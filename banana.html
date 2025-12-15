@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+    <title>Gemini Pro 工作台 v4.9 修改版</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { 
+                        mono: ['JetBrains Mono', 'Menlo', 'monospace'], 
+                        sans: ['Inter', 'system-ui', 'sans-serif'] 
+                    },
+                    colors: {
+                        gray: { 850: '#1f2937', 900: '#111827', 950: '#0b0f19' },
+                    },
+                    animation: {
+                        'slide-in': 'slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+                        'fade-in': 'fadeIn 0.2s ease-out',
+                        'bounce-in': 'bounceIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+                    },
+                    keyframes: {
+                        slideIn: {
+                            '0%': { transform: 'translateX(100%)' },
+                            '100%': { transform: 'translateX(0)' },
+                        },
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' },
+                        },
+                        bounceIn: {
+                            '0%': { transform: 'scale(0.8)', opacity: '0' },
+                            '100%': { transform: 'scale(1)', opacity: '1' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Icons & Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+    
+    <!-- Markdown & Highlight -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" rel="stylesheet"/>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    
+    <!-- JSZip for Batch Download -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body class="h-screen flex overflow-hidden text-sm selection:bg-blue-500/30 touch-none" id="appBody">
+    <!-- Drag Overlay (Global) -->
+    <div id="dragOverlay" class="fixed inset-0 z-[100] hidden flex items-center justify-center">
+        <div class="text-blue-400 font-bold text-2xl flex flex-col items-center animate-bounce">
+            <span class="material-symbols-rounded text-6xl mb-4">cloud_upload</span>
+            拖拽图片以上传
+        </div>
+    </div>
+
+    <!-- Mobile Sidebar Backdrop -->
+    <div id="mobileSidebarBackdrop" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-20 md:hidden hidden transition-opacity" onclick="toggleMobileSidebar(false)"></div>
+
+    <!-- LEFT SIDEBAR: CONFIGURATION (Responsive: Drawer on Mobile, Fixed on Desktop) -->
+    <aside id="leftSidebar" class="fixed inset-y-0 left-0 z-30 w-80 bg-[#0f1219] border-r border-gray-800 flex flex-col shadow-2xl flex-shrink-0 transform -translate-x-full md:translate-x-0 md:relative transition-transform duration-300 ease-in-out">
+        <div class="h-14 flex items-center px-5 border-b border-gray-800 bg-[#0b0f19] justify-between md:justify-start">
+            <div class="flex items-center">
+                <span class="material-symbols-rounded text-blue-500 mr-2 text-xl">all_inclusive</span>
+                <h1 class="font-bold text-gray-200 tracking-tight text-base">Gemini <span class="hidden lg:inline">工作台</span> <span class="text-[10px] text-gray-500 font-normal border border-gray-700 px-1 rounded ml-2">v4.9 修改版</span></h1>
+            </div>
+            <button class="md:hidden text-gray-500 hover:text-white" onclick="toggleMobileSidebar(false)">
+                <span class="material-symbols-rounded">close</span>
+            </button>
+        </div>
+        
+        <div class="flex-1 overflow-y-auto p-5 space-y-6 custom-scrollbar pb-20 md:pb-5">
+            <!-- Mobile Theme Toggles -->
+            <div class="md:hidden grid grid-cols-2 gap-2">
+                <button id="mobileThemeToggleBtn" class="py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-300 flex items-center justify-center gap-2 transition-colors active:scale-95" onclick="toggleTheme()">
+                    <span class="material-symbols-rounded">light_mode</span> 主题
+                </button>
+                <button id="mobileBwToggleBtn" class="py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-300 flex items-center justify-center gap-2 transition-colors active:scale-95" onclick="toggleBW()">
+                    <span class="material-symbols-rounded">invert_colors</span> 黑白
+                </button>
+            </div>
+
+            <!-- Connection -->
+            <section class="space-y-4">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xs font-bold text-gray-500 uppercase tracking-wider">连接设置</h3>
+                    <button class="text-[10px] text-blue-400 hover:text-blue-300 border border-blue-900/50 bg-blue-900/10 px-2 py-1 rounded transition-colors flex items-center gap-1" onclick="saveApiConfig()">
+                        <span class="material-symbols-rounded text-[14px]">save</span> 保存配置
+                    </button>
+                </div>
+                <div class="space-y-1.5">
+                   <label class="text-[10px] text-gray-400 font-medium uppercase">API 格式</label>
+                   <div id="apiFormatGroup" class="flex gap-2">
+                        <button type="button" data-value="gemini" class="flex-1 py-1.5 rounded-lg border bg-blue-600 border-blue-500 text-white text-xs font-medium transition-colors active:scale-95" aria-pressed="true">Gemini</button>
+                        <button type="button" data-value="openai" class="flex-1 py-1.5 rounded-lg border bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800 text-xs font-medium transition-colors active:scale-95" aria-pressed="false">OpenAI</button>
+                        <button type="button" data-value="vertex" class="flex-1 py-1.5 rounded-lg border bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800 text-xs font-medium transition-colors active:scale-95" aria-pressed="false">Vertex</button>
+                   </div>
+                </div>
+                <div class="space-y-1.5">
+                    <label class="text-[10px] text-gray-400 font-medium uppercase">基础 URL (Base URL)</label>
+                    <input autocomplete="off" class="input-dark w-full rounded px-3 py-2 text-xs font-mono" id="baseUrl" type="text" value="https://generativelanguage.googleapis.com"/>
+                </div>
+                <div class="space-y-1.5">
+                    <label class="text-[10px] text-gray-400 font-medium uppercase">API 版本</label>
+                    <input class="input-dark w-full rounded px-3 py-2 text-xs font-mono text-yellow-500" id="apiVersion" type="text" value="v1beta"/>
+                </div>
+                <div class="space-y-1.5">
+                    <label class="text-[10px] text-gray-400 font-medium uppercase">API 密钥</label>
+                    <div class="relative">
+                        <input class="input-dark w-full rounded px-3 py-2 text-xs font-mono pr-8" id="apiKey" placeholder="粘贴密钥..." type="password"/>
+                        <button class="absolute right-2 top-2 text-gray-500 hover:text-gray-300" onclick="togglePassword()">
+                            <span class="material-symbols-rounded text-sm">visibility_off</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="space-y-1.5 hidden" id="vertexKeysContainer">
+                    <label class="text-[10px] text-gray-400 font-medium uppercase">Vertex Keys (Key|ProjectID，每行一个)</label>
+                    <textarea id="vertexKeysInput" class="input-dark w-full rounded px-3 py-2 text-[10px] font-mono min-h-[60px]" placeholder="AQ...|my-project-id&#10;AQ...|another-project-id"></textarea>
+                    <p class="text-[10px] text-gray-500">在启用 Vertex 渠道时，将按照顺序轮询使用这些 Key。</p>
+                </div>
+            </section>
+            
+            <!-- Saved API Configs -->
+            <section class="space-y-2" id="apiConfigListContainer">
+                <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-wider">已存配置</h4>
+                <div id="apiConfigList" class="space-y-2">
+                    <!-- Saved configs will be rendered here -->
+                </div>
+            </section>
+
+            <hr class="border-gray-800/50"/>
+            
+            <!-- Model -->
+            <section class="space-y-4">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xs font-bold text-gray-500 uppercase tracking-wider">模型</h3>
+                    <button class="text-[10px] text-blue-400 hover:text-blue-300 border border-blue-900/50 bg-blue-900/10 px-2 py-1 rounded transition-colors flex items-center gap-1" id="fetchModelsBtn">
+                        <span class="material-symbols-rounded text-[14px]">sync</span> 刷新列表
+                    </button>
+                </div>
+                <div class="space-y-1.5">
+                    <label class="text-[10px] text-gray-400 font-medium uppercase">模型 ID</label>
+                    <input class="input-dark w-full rounded px-3 py-2 text-xs font-mono text-green-400 font-bold" id="modelId" list="modelList" type="text" value="gemini-3-pro-image-preview"/>
+                    <datalist id="modelList">
+                        <option value="gemini-2.0-flash-thinking-exp-01-21">
+                        <option value="gemini-2.0-flash-exp">
+                        <option value="gemini-1.5-pro">
+                        <option value="gemini-1.5-flash">
+                    </datalist>
+                </div>
+            </section>
+
+            <!-- Config Buttons -->
+            <section>
+                <button onclick="toggleConfigModal(true)" class="w-full py-3 md:py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-xs text-gray-300 flex items-center justify-center gap-2 transition-colors active:scale-95">
+                    <span class="material-symbols-rounded text-base text-purple-400">tune</span>
+                    高级配置
+                </button>
+                <div class="mt-2 text-[10px] text-gray-500 text-center">安全设定、思考过程及自定义 Payload</div>
+            </section>
+
+            <hr class="border-gray-800/50"/>
+            
+            <!-- Params -->
+            <section class="space-y-5">
+                <h3 class="text-xs font-bold text-gray-500 uppercase tracking-wider">基础参数</h3>
+                <div>
+                    <div class="flex justify-between text-[10px] mb-2">
+                        <span class="text-gray-300">并发数</span>
+                        <span class="text-blue-400 font-mono font-bold bg-blue-900/20 px-1.5 rounded" id="concVal">1</span>
+                    </div>
+                    <input class="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500 touch-pan-x" id="concRange" max="10" min="1" step="1" type="range" value="1"/>
+                </div>
+                <div>
+                    <div class="flex justify-between text-[10px] mb-2">
+                        <span class="text-gray-300">温度</span>
+                        <span class="text-gray-300 font-mono bg-gray-800 px-1.5 rounded" id="tempVal">1.0</span>
+                    </div>
+                    <input class="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-gray-400 touch-pan-x" id="tempRange" max="2" min="0" step="0.1" type="range" value="1.0"/>
+                </div>
+                <div class="space-y-1.5">
+                    <label class="text-[10px] text-gray-400 font-medium uppercase">系统提示词 (System Prompt)</label>
+                    <textarea id="systemPromptQuick" class="input-dark w-full rounded px-3 py-2 text-xs font-mono min-h-[60px]" placeholder="可选：输入系统提示词，将作为系统指令发送给模型..." spellcheck="false"></textarea>
+                </div>
+                <div class="space-y-1.5">
+                    <label class="text-[10px] text-gray-400 font-medium uppercase">模型预填充 (Model Prefill)</label>
+                    <textarea id="modelPrefillQuick" class="input-dark w-full rounded px-3 py-2 text-xs font-mono min-h-[60px]" placeholder="可选：输入模型预填充内容，将作为模型的第一次回复插入会话开头..." spellcheck="false"></textarea>
+                </div>
+            </section>
+
+            <hr class="border-gray-800/50"/>
+
+            <!-- Release Notes -->
+            <section class="space-y-3">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xs font-bold text-gray-500 uppercase tracking-wider">更新日志</h3>
+                    <span class="text-[10px] text-gray-500 font-mono">v4.9 修改版</span>
+                </div>
+                <ul class="text-[11px] text-gray-400 space-y-1 list-disc list-inside leading-relaxed">
+                    <li>感谢牢墨和gemini-3-pro-preview（是id名不是真哈基米）的修改建议</li>
+                    <li>各种小功能添加</li>
+                    <li>修复了一些bug</li>
+                    <li>现在默认隐藏思维链和文字回答</li>
+                </ul>
+            </section>
+        </div>
+
+        <!-- Live Endpoint Display -->
+        <div class="px-4 py-3 bg-[#080b12] border-t border-gray-800/50 hidden md:block">
+            <div class="text-[9px] text-gray-500 uppercase font-bold mb-1 tracking-wider">实时端点</div>
+            <div class="font-mono text-[10px] leading-relaxed break-all">
+                <span class="text-gray-500">POST</span> 
+                <span class="text-gray-400" id="epBase">...</span>/<span class="text-yellow-600" id="epVer">...</span>/<span class="text-green-400 font-bold" id="epModel">...</span>:generateContent
+            </div>
+        </div>
+
+        <!-- Footer Status -->
+        <div class="p-3 bg-[#0b0f19] border-t border-gray-800 text-[10px] text-gray-600 font-mono flex justify-between items-center absolute bottom-0 w-full md:relative pb-safe">
+            <span class="flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-green-500/50"></span> 
+                <span class="hidden md:inline">系统就绪</span>
+                <span class="md:hidden">Ready</span>
+            </span>
+            <span id="clock">00:00</span>
+        </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="flex-1 flex flex-col relative bg-[#0b0f19] bg-[radial-gradient(circle_at_top_right,_rgba(15,23,42,0.8),_transparent_50%)] w-full">
+        <!-- Top Toolbar -->
+        <header class="min-h-[4rem] py-2 border-b border-gray-800 flex flex-wrap md:flex-nowrap items-center px-3 md:px-6 gap-2 md:gap-4 bg-[#0b0f19]/80 backdrop-blur z-20 sticky top-0">
+            
+            <!-- Mobile Menu Toggle -->
+            <button class="md:hidden h-10 w-10 flex items-center justify-center rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition-colors" onclick="toggleMobileSidebar(true)">
+                <span class="material-symbols-rounded text-xl">menu</span>
+            </button>
+
+            <button id="themeToggleBtn" class="hidden md:flex h-10 w-10 items-center justify-center rounded-lg bg-gray-800/50 hover:bg-gray-700 border border-gray-700 text-gray-400 hover:text-yellow-400 transition-colors active:scale-95" onclick="toggleTheme()" title="切换为白色主题">
+                <span class="material-symbols-rounded text-xl">light_mode</span>
+            </button>
+            <button id="bwToggleBtn" class="hidden md:flex h-10 w-10 items-center justify-center rounded-lg bg-gray-800/50 hover:bg-gray-700 border border-gray-700 text-gray-400 hover:text-yellow-400 transition-colors active:scale-95" onclick="toggleBW()" title="切换为黑白界面">
+                <span class="material-symbols-rounded text-xl">invert_colors</span>
+            </button>
+            
+            <!-- Upload -->
+            <div class="relative group self-start mt-1.5" id="mainMediaBtnContainer">
+                <input accept="image/*" class="hidden" id="fileInput" multiple="" type="file"/>
+                <button class="h-10 px-3 md:px-4 rounded-lg bg-gray-800/50 hover:bg-gray-700 text-gray-300 border border-gray-700 hover:border-gray-600 transition-all flex items-center gap-2 text-xs font-medium active:scale-95" onclick="document.getElementById('fileInput').click()">
+                    <span class="material-symbols-rounded text-xl text-blue-400">add_photo_alternate</span>
+                    <span class="hidden sm:inline">媒体</span>
+                    <span class="hidden bg-blue-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full" id="imgCount">0</span>
+                </button>
+            </div>
+            <!-- Builder Active Indicator -->
+            <div id="builderActiveIndicator" class="hidden self-start mt-2 px-3 py-1.5 bg-purple-900/20 border border-purple-500/30 rounded-lg text-[10px] text-purple-300 items-center gap-2 select-none cursor-help" title="媒体将在构建器中管理">
+                <span class="material-symbols-rounded text-sm">layers</span>
+                <span class="hidden sm:inline">多轮对话构建器已激活</span>
+                <span class="sm:hidden">Builder</span>
+            </div>
+            
+            <!-- Prompt Input Area -->
+            <div class="flex-1 relative group flex items-start gap-2 min-w-[150px] order-last md:order-none w-full md:w-auto">
+                <div class="relative flex-1 bg-[#111827] border border-gray-700 rounded-xl shadow-inner focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-all flex flex-col min-h-[42px]">
+                    <!-- Icon Left -->
+                    <div class="absolute top-2.5 left-3 pointer-events-none text-gray-500 group-focus-within:text-blue-400 transition-colors">
+                        <span class="material-symbols-rounded">edit_note</span>
+                    </div>
+                    
+                    <!-- Enhanced Textarea -->
+                    <textarea 
+                        id="promptInput" 
+                        rows="1" 
+                        class="w-full bg-transparent text-sm text-gray-200 placeholder-gray-600 py-2.5 pl-10 pr-20 outline-none resize-none custom-scrollbar leading-relaxed max-h-32 overflow-hidden"
+                        placeholder="输入提示词..."
+                        oninput="autoResize(this)"></textarea>
+
+                    <!-- Actions Right -->
+                    <div class="absolute top-1.5 right-1.5 flex items-center gap-1 bg-[#111827]/80 backdrop-blur rounded-lg px-1">
+                        <!-- Clear -->
+                        <button onclick="clearPrompt()" class="p-1 text-gray-500 hover:text-gray-300 rounded hover:bg-gray-700/50 transition-colors" title="清空提示词">
+                            <span class="material-symbols-rounded text-lg">close</span>
+                        </button>
+                        <!-- Maximize -->
+                        <button onclick="togglePromptModal(true)" class="p-1 text-gray-500 hover:text-blue-400 rounded hover:bg-blue-900/20 transition-colors" title="高级提示词构建器">
+                            <span class="material-symbols-rounded text-lg">open_in_full</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Preset/Collection Buttons (Hidden on very small screens or stacked?) -> Keep aligned -->
+                <div class="flex gap-1 md:gap-2 self-start mt-0.5">
+                    <button class="h-10 w-10 flex items-center justify-center rounded-lg bg-gray-800/50 hover:bg-gray-700 border border-gray-700 text-gray-400 hover:text-yellow-400 transition-colors active:scale-95" onclick="savePreset()" title="保存当前提示词">
+                        <span class="material-symbols-rounded">bookmark_add</span>
+                    </button>
+                    <button class="h-10 w-10 flex items-center justify-center rounded-lg bg-gray-800/50 hover:bg-gray-700 border border-gray-700 text-gray-400 hover:text-blue-400 transition-colors active:scale-95" onclick="toggleCollectionsModal(true)" title="保存的对话 & 提示词">
+                        <span class="material-symbols-rounded">folder_open</span>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Card Size Toggle -->
+            <div class="flex items-center self-start mt-0.5 gap-1 text-[10px] text-gray-400">
+                <span class="hidden xl:inline">卡片大小</span>
+                <div class="flex items-center gap-2">
+                    <div id="cardSizeToggle" class="flex rounded-lg bg-gray-800/60 border border-gray-700 overflow-hidden">
+                        <button type="button" data-size="sm" class="px-2 md:px-3 py-1 text-[10px] text-gray-400 hover:text-gray-100 hover:bg-gray-700/70">小</button>
+                        <button type="button" data-size="md" class="px-2 md:px-3 py-1 text-[10px] text-gray-400 hover:text-gray-100 hover:bg-gray-700/70">中</button>
+                        <button type="button" data-size="lg" class="px-2 md:px-3 py-1 text-[10px] text-gray-400 hover:text-gray-100 hover:bg-gray-700/70">大</button>
+                    </div>
+                    <!-- Density Slider for finer control -->
+                    <div class="flex items-center gap-1 ml-1">
+                        <span class="hidden 2xl:inline text-gray-500">密度</span>
+                        <input
+                            id="cardDensityRange"
+                            type="range"
+                            min="1"
+                            max="5"
+                            step="1"
+                            class="w-20 h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500 touch-pan-x"
+                            title="调节一行中卡片的密度"
+                        />
+                    </div>
+                </div>
+            </div>
+
+            <!-- Auth -->
+            <div id="authArea" class="ml-auto flex items-center gap-2 self-start mt-0.5">
+                <div id="authUserPill" class="hidden items-center gap-2 px-3 h-10 rounded-lg bg-gray-800/50 border border-gray-700 text-xs text-gray-200">
+                    <span class="material-symbols-rounded text-blue-400 text-lg">account_circle</span>
+                    <span class="font-mono" id="authUserLabel">guest</span>
+                    <span id="authAdminBadge" class="hidden text-[10px] font-bold px-1.5 py-0.5 rounded border border-yellow-600/40 bg-yellow-900/20 text-yellow-200">ADMIN</span>
+                </div>
+                <button id="loginBtn" class="h-10 px-3 rounded-lg bg-gray-800/50 hover:bg-gray-700 text-gray-200 border border-gray-700 hover:border-gray-600 transition-all text-xs font-medium active:scale-95" onclick="toggleAuthModal(true, 'login')">登录</button>
+                <button id="registerBtn" class="h-10 px-3 rounded-lg bg-gray-800/50 hover:bg-gray-700 text-gray-200 border border-gray-700 hover:border-gray-600 transition-all text-xs font-medium active:scale-95" onclick="toggleAuthModal(true, 'register')">注册</button>
+                <button id="logoutBtn" class="hidden h-10 px-3 rounded-lg bg-red-900/20 hover:bg-red-900/30 text-red-200 border border-red-800/60 transition-all text-xs font-medium active:scale-95" onclick="logout()">退出</button>
+            </div>
+
+            <!-- Generate Button -->
+            <button class="self-start mt-0.5 h-10 px-4 md:px-6 rounded-lg bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white text-xs font-bold tracking-wide shadow-lg shadow-blue-900/20 transition-all active:scale-95 flex items-center gap-2 border border-blue-500/50 flex-shrink-0" id="runBtn" onclick="runBatchGeneration()">
+                <span class="material-symbols-rounded text-xl">play_circle</span>
+                <span class="hidden sm:inline">生成</span>
+            </button>
+        </header>
+
+        <!-- Image Preview (Global) -->
+        <div class="hidden px-4 md:px-6 py-3 border-b border-gray-800 bg-[#0d1117] flex gap-3 overflow-x-auto custom-scrollbar" id="previewStrip"></div>
+
+        <!-- Canvas Grid -->
+        <div class="flex-1 overflow-y-auto p-3 md:p-6 custom-scrollbar relative pb-24 md:pb-24 touch-pan-y" id="canvas">
+            <div class="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4 md:gap-6 max-w-[2000px] mx-auto" id="gridContainer">
+                <!-- Empty State -->
+                <div class="col-span-full flex flex-col items-center justify-center h-[50vh] md:h-[60vh] text-gray-600 select-none animate-fade-in px-4 text-center" id="emptyState">
+                    <div class="w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-gray-800/30 flex items-center justify-center mb-6 border border-gray-800 shadow-2xl">
+                        <span class="material-symbols-rounded text-3xl md:text-4xl text-gray-600">grid_view</span>
+                    </div>
+                    <h2 class="text-lg md:text-xl font-medium text-gray-400">工作台就绪</h2>
+                    <p class="text-xs md:text-sm mt-2 text-gray-600 max-w-xs">拖拽图片、配置模型并开始生成。</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Multi-Select Toolbar -->
+        <div class="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-gray-900/95 backdrop-blur-lg border border-gray-700 rounded-xl shadow-2xl px-4 md:px-6 py-2 md:py-3 flex flex-wrap justify-center items-center gap-4 md:gap-6 z-30 transition-all duration-300 translate-y-32 opacity-0 w-[90%] md:w-auto" id="selectionToolbar">
+            <div class="flex items-center gap-3 border-r border-gray-700 pr-4 md:pr-6">
+                <span class="text-blue-400 font-bold text-lg" id="selectedCount">0</span>
+                <span class="text-xs text-gray-400 uppercase tracking-wider font-medium">已选</span>
+                <button class="text-xs text-gray-500 hover:text-gray-300 underline ml-2" onclick="clearSelection()">清空</button>
+            </div>
+            <div class="flex items-center gap-2">
+                <button class="flex flex-col items-center gap-1 px-3 py-1 text-gray-400 hover:text-yellow-400 hover:bg-yellow-900/20 rounded-lg transition-colors active:scale-95" onclick="selectAll()">
+                    <span class="material-symbols-rounded">select_all</span>
+                    <span class="text-[10px]">全选</span>
+                </button>
+                <button class="flex flex-col items-center gap-1 px-3 py-1 text-gray-400 hover:text-green-400 hover:bg-green-900/20 rounded-lg transition-colors active:scale-95" onclick="downloadSelectedImages()">
+                    <span class="material-symbols-rounded">archive</span>
+                    <span class="text-[10px]">ZIP</span>
+                </button>
+                <button class="flex flex-col items-center gap-1 px-3 py-1 text-gray-400 hover:text-yellow-400 hover:bg-yellow-900/20 rounded-lg transition-colors active:scale-95" onclick="saveSelectedSessions()">
+                    <span class="material-symbols-rounded">star</span>
+                    <span class="text-[10px]">保存</span>
+                </button>
+                <button class="flex flex-col items-center gap-1 px-3 py-1 text-gray-400 hover:text-red-400 hover:bg-red-900/20 rounded-lg transition-colors active:scale-95" onclick="deleteSelected()">
+                    <span class="material-symbols-rounded">delete</span>
+                    <span class="text-[10px]">删除</span>
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <!-- RIGHT DRAWER: CHAT MODE (Responsive Width) -->
+    <div class="fixed inset-y-0 right-0 w-full md:w-[500px] bg-[#0f1219] border-l border-gray-800 shadow-2xl transform translate-x-full transition-transform duration-300 z-40 flex flex-col" id="chatDrawer">
+        <div class="h-14 border-b border-gray-800 flex justify-between items-center px-5 bg-[#111827]">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-purple-900/20 flex items-center justify-center text-purple-400 border border-purple-900/50">
+                    <span class="material-symbols-rounded">chat</span>
+                </div>
+                <div class="overflow-hidden">
+                    <h3 class="font-bold text-gray-200 text-sm truncate">会话聊天</h3>
+                    <p class="text-[10px] text-gray-500 font-mono truncate" id="chatSessionId">ID: ---</p>
+                </div>
+            </div>
+            <div class="flex gap-1">
+                <button class="text-gray-500 hover:text-yellow-400 transition-colors p-2 rounded hover:bg-gray-800 active:scale-95" onclick="saveCurrentSessionToLibrary()" title="保存至库">
+                    <span class="material-symbols-rounded">star</span>
+                </button>
+                <button class="text-gray-500 hover:text-white transition-colors p-2 rounded hover:bg-gray-800 active:scale-95" onclick="toggleChatDrawer(false)">
+                    <span class="material-symbols-rounded">close_fullscreen</span>
+                </button>
+            </div>
+        </div>
+        <div class="flex-1 overflow-y-auto p-4 md:p-5 space-y-6 custom-scrollbar bg-[#0b0f19]" id="chatHistoryContainer"></div>
+        <div class="p-4 border-t border-gray-800 bg-[#111827] pb-safe">
+            <div class="relative">
+                <textarea class="w-full bg-[#1f2937] border border-gray-700 rounded-xl p-3 pr-12 text-sm text-gray-200 outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 resize-none custom-scrollbar" id="chatInput" placeholder="输入回复..." rows="2"></textarea>
+                <div class="absolute right-2 bottom-2 flex gap-2">
+                    <button class="p-1.5 bg-red-600 hover:bg-red-500 text-white rounded-lg transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed active:scale-95" id="chatStopBtn" onclick="stopActiveChat()" disabled>
+                        <span class="material-symbols-rounded text-lg">stop_circle</span>
+                    </button>
+                    <button class="p-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed active:scale-95" id="sendChatBtn" onclick="sendChatMessage()">
+                        <span class="material-symbols-rounded text-lg">send</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CONFIGURATION MODAL -->
+    <div class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" id="configModal">
+        <div class="bg-[#0f1219] w-full md:max-w-3xl max-h-[90vh] md:max-h-[85vh] rounded-xl border border-gray-700 flex flex-col overflow-hidden shadow-2xl animate-bounce-in">
+            <div class="h-14 border-b border-gray-800 flex justify-between items-center px-5 bg-[#161b26]">
+                <div class="flex items-center gap-2">
+                    <span class="material-symbols-rounded text-purple-400">tune</span>
+                    <span class="font-bold text-gray-200">高级配置</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="saveAdvancedConfig()" class="text-xs text-green-400 hover:text-green-300 flex items-center gap-1 px-2 py-1 rounded hover:bg-green-900/20 transition-colors active:scale-95">
+                        <span class="material-symbols-rounded text-sm">save</span>保存设置
+                    </button>
+                    <button class="text-gray-500 hover:text-white p-2" onclick="toggleConfigModal(false)"><span class="material-symbols-rounded">close</span></button>
+                </div>
+            </div>
+            
+            <div class="flex-1 flex flex-col overflow-hidden">
+                <!-- Tabs -->
+                <div class="flex border-b border-gray-800 bg-[#111827]">
+                    <button class="flex-1 md:flex-none px-6 py-3 text-xs font-medium text-blue-400 border-b-2 border-blue-500 bg-blue-900/10 focus:outline-none" id="tabGuiBtn" onclick="switchConfigTab('gui')">图形界面设置</button>
+                    <button class="flex-1 md:flex-none px-6 py-3 text-xs font-medium text-gray-400 hover:text-gray-200 focus:outline-none" id="tabJsonBtn" onclick="switchConfigTab('json')">JSON 载荷</button>
+                </div>
+
+                <!-- GUI Content -->
+                <div id="configGuiPanel" class="flex-1 overflow-y-auto p-4 md:p-6 custom-scrollbar space-y-6">
+                    <!-- Thinking Config -->
+                    <div class="bg-gray-800/30 p-4 rounded-lg border border-gray-700">
+                        <div class="flex items-center justify-between mb-4">
+                            <h4 class="text-sm font-bold text-gray-200 flex items-center gap-2">
+                                <span class="material-symbols-rounded text-yellow-400">psychology</span> 思考配置 (Thinking Config)
+                            </h4>
+                            <div class="flex items-center gap-2">
+                                <label class="text-[10px] text-gray-400 uppercase">启用</label>
+                                <input type="checkbox" id="includeThoughtsCheck" class="custom-checkbox" checked>
+                            </div>
+                        </div>
+                        <div class="space-y-2">
+                            <div class="flex justify-between text-xs text-gray-400">
+                                <span>预算 (Tokens)</span>
+                                <span class="font-mono text-white" id="thinkingBudgetVal">128</span>
+                            </div>
+                            <input type="range" id="thinkingBudgetRange" min="0" max="8192" step="128" value="128" class="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-yellow-500 touch-pan-x">
+                        </div>
+                    </div>
+
+                    <!-- Image Settings -->
+                    <div class="bg-gray-800/30 p-4 rounded-lg border border-gray-700">
+                        <div class="flex items-center justify-between mb-4">
+                            <h4 class="text-sm font-bold text-gray-200 flex items-center gap-2">
+                                <span class="material-symbols-rounded text-blue-400">photo_size_select_large</span> 图像参数
+                            </h4>
+                            <div class="flex items-center gap-2">
+                                <label class="text-[10px] text-gray-400 uppercase">启用</label>
+                                <input type="checkbox" id="includeImageConfigCheck" class="custom-checkbox" checked>
+                            </div>
+                        </div>
+                        <div class="space-y-3">
+                            <div>
+                                <div class="text-[10px] text-gray-400 uppercase mb-1">分辨率</div>
+                                <div id="imageSizeGroup" class="flex flex-wrap gap-2">
+                                    <button type="button" data-value="1K" class="px-3 py-1.5 rounded-lg border bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800 text-xs font-medium transition-colors active:scale-95">1K</button>
+                                    <button type="button" data-value="2K" class="px-3 py-1.5 rounded-lg border bg-blue-600 border-blue-500 text-white text-xs font-medium transition-colors active:scale-95" aria-pressed="true">2K</button>
+                                    <button type="button" data-value="4K" class="px-3 py-1.5 rounded-lg border bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800 text-xs font-medium transition-colors active:scale-95">4K</button>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="text-[10px] text-gray-400 uppercase mb-1">比例</div>
+                                <div id="aspectRatioGroup" class="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                                    <button type="button" data-value="auto" class="px-3 py-1.5 rounded-lg border bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800 text-xs font-medium transition-colors active:scale-95 flex items-center justify-center">auto</button>
+                                    <button type="button" data-value="1:1" class="px-3 py-1.5 rounded-lg border bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800 text-xs font-medium transition-colors active:scale-95 flex items-center"><div class="aspect-ratio-preview"><div style="width: 16px; height: 16px;"></div></div>1:1</button>
+                                    <button type="button" data-value="3:4" class="px-3 py-1.5 rounded-lg border bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800 text-xs font-medium transition-colors active:scale-95 flex items-center"><div class="aspect-ratio-preview"><div style="width: 12px; height: 16px;"></div></div>3:4</button>
+                                    <button type="button" data-value="4:3" class="px-3 py-1.5 rounded-lg border bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800 text-xs font-medium transition-colors active:scale-95 flex items-center"><div class="aspect-ratio-preview"><div style="width: 16px; height: 12px;"></div></div>4:3</button>
+                                    <button type="button" data-value="9:16" class="px-3 py-1.5 rounded-lg border bg-blue-600 border-blue-500 text-white text-xs font-medium transition-colors active:scale-95 flex items-center" aria-pressed="true"><div class="aspect-ratio-preview"><div style="width: 9px; height: 16px;"></div></div>9:16</button>
+                                    <button type="button" data-value="16:9" class="px-3 py-1.5 rounded-lg border bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800 text-xs font-medium transition-colors active:scale-95 flex items-center"><div class="aspect-ratio-preview"><div style="width: 16px; height: 9px;"></div></div>16:9</button>
+                                    <button type="button" data-value="2:3" class="px-3 py-1.5 rounded-lg border bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800 text-xs font-medium transition-colors active:scale-95 flex items-center"><div class="aspect-ratio-preview"><div style="width: 10.7px; height: 16px;"></div></div>2:3</button>
+                                    <button type="button" data-value="3:2" class="px-3 py-1.5 rounded-lg border bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800 text-xs font-medium transition-colors active:scale-95 flex items-center"><div class="aspect-ratio-preview"><div style="width: 16px; height: 10.7px;"></div></div>3:2</button>
+                                    <button type="button" data-value="4:5" class="px-3 py-1.5 rounded-lg border bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800 text-xs font-medium transition-colors active:scale-95 flex items-center"><div class="aspect-ratio-preview"><div style="width: 12.8px; height: 16px;"></div></div>4:5</button>
+                                    <button type="button" data-value="5:4" class="px-3 py-1.5 rounded-lg border bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800 text-xs font-medium transition-colors active:scale-95 flex items-center"><div class="aspect-ratio-preview"><div style="width: 16px; height: 12.8px;"></div></div>5:4</button>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="flex justify-between text-[10px] text-gray-400 mb-1">
+                                    <span>WebP 质量 (50-100)</span>
+                                    <span class="font-mono text-gray-200" id="webpQualityVal">95</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    id="webpQualityRange"
+                                    min="50"
+                                    max="100"
+                                    step="1"
+                                    value="95"
+                                    class="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-yellow-500 touch-pan-x">
+                            </div>
+                            <div class="pt-1 border-t border-gray-700/60 mt-3 flex items-center justify-between">
+                                <div class="mr-3">
+                                    <div class="text-[10px] text-gray-400 uppercase mb-0.5">响应模态 (Response Modalities)</div>
+                                    <div class="text-[10px] text-gray-500 leading-snug">
+                                        使用谷歌原生端点 https://generativelanguage.googleapis.com 时启用<br/>
+                                    </div>
+                                </div>
+                                <label class="flex items-center gap-2">
+                                    <span class="text-[11px] text-gray-300">TEXT + IMAGE</span>
+                                    <input type="checkbox" id="enableResponseModalitiesCheck" class="custom-checkbox">
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Safety Settings -->
+                    <div class="bg-gray-800/30 p-4 rounded-lg border border-gray-700">
+                        <div class="flex items-center justify-between mb-4">
+                            <h4 class="text-sm font-bold text-gray-200 flex items-center gap-2">
+                                <span class="material-symbols-rounded text-red-400">shield</span> 安全设置
+                            </h4>
+                            <div class="flex items-center gap-2">
+                                <label class="text-[10px] text-gray-400 uppercase">启用</label>
+                                <input type="checkbox" id="includeSafetySettingsCheck" class="custom-checkbox" checked>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <!-- Harassment -->
+                            <div class="space-y-1">
+                                <label class="text-[10px] text-gray-400 uppercase">骚扰内容 (Harassment)</label>
+                                <select id="safeHarassment" class="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-blue-500">
+                                    <option value="OFF" selected>OFF</option>
+                                    <option value="BLOCK_NONE">BLOCK_NONE</option>
+                                    <option value="BLOCK_ONLY_HIGH">BLOCK_ONLY_HIGH</option>
+                                    <option value="BLOCK_MEDIUM_AND_ABOVE">BLOCK_MEDIUM</option>
+                                    <option value="BLOCK_LOW_AND_ABOVE">BLOCK_LOW</option>
+                                </select>
+                            </div>
+                            <!-- Hate Speech -->
+                            <div class="space-y-1">
+                                <label class="text-[10px] text-gray-400 uppercase">仇恨言论 (Hate Speech)</label>
+                                <select id="safeHate" class="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-blue-500">
+                                    <option value="OFF" selected>OFF</option>
+                                    <option value="BLOCK_NONE">BLOCK_NONE</option>
+                                    <option value="BLOCK_ONLY_HIGH">BLOCK_ONLY_HIGH</option>
+                                    <option value="BLOCK_MEDIUM_AND_ABOVE">BLOCK_MEDIUM</option>
+                                    <option value="BLOCK_LOW_AND_ABOVE">BLOCK_LOW</option>
+                                </select>
+                            </div>
+                             <!-- Sexually Explicit -->
+                             <div class="space-y-1">
+                                <label class="text-[10px] text-gray-400 uppercase">色情内容 (Sexually Explicit)</label>
+                                <select id="safeSex" class="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-blue-500">
+                                    <option value="OFF" selected>OFF</option>
+                                    <option value="BLOCK_NONE">BLOCK_NONE</option>
+                                    <option value="BLOCK_ONLY_HIGH">BLOCK_ONLY_HIGH</option>
+                                    <option value="BLOCK_MEDIUM_AND_ABOVE">BLOCK_MEDIUM</option>
+                                    <option value="BLOCK_LOW_AND_ABOVE">BLOCK_LOW</option>
+                                </select>
+                            </div>
+                            <!-- Dangerous -->
+                            <div class="space-y-1">
+                                <label class="text-[10px] text-gray-400 uppercase">危险内容 (Dangerous Content)</label>
+                                <select id="safeDanger" class="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-blue-500">
+                                    <option value="OFF" selected>OFF</option>
+                                    <option value="BLOCK_NONE">BLOCK_NONE</option>
+                                    <option value="BLOCK_ONLY_HIGH">BLOCK_ONLY_HIGH</option>
+                                    <option value="BLOCK_MEDIUM_AND_ABOVE">BLOCK_MEDIUM</option>
+                                    <option value="BLOCK_LOW_AND_ABOVE">BLOCK_LOW</option>
+                                </select>
+                            </div>
+                            <!-- Civic -->
+                            <div class="space-y-1">
+                                <label class="text-[10px] text-gray-400 uppercase">公民诚信 (Civic Integrity)</label>
+                                <select id="safeCivic" class="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-blue-500">
+                                    <option value="BLOCK_NONE" selected>BLOCK_NONE</option>
+                                    <option value="OFF">OFF</option>
+                                    <option value="BLOCK_ONLY_HIGH">BLOCK_ONLY_HIGH</option>
+                                    <option value="BLOCK_MEDIUM_AND_ABOVE">BLOCK_MEDIUM</option>
+                                    <option value="BLOCK_LOW_AND_ABOVE">BLOCK_LOW</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- JSON Content -->
+                <div id="configJsonPanel" class="flex-1 hidden flex-col p-0">
+                    <div class="bg-[#111827] px-4 py-2 text-[10px] text-gray-500 border-b border-gray-800">
+                        输入要合并到请求体中的自定义 JSON 属性。（例如 topK, stopSequences）
+                    </div>
+                    <textarea id="customJsonInput" class="flex-1 bg-[#0d1117] p-4 text-xs font-mono text-gray-300 outline-none resize-none" placeholder='{ "generationConfig": { "topK": 40 } }'></textarea>
+                </div>
+            </div>
+
+             <!-- Preview Footer (Expanded & Improved) -->
+             <div class="h-1/3 min-h-[150px] border-t border-gray-800 bg-[#0b0f19] flex flex-col">
+                <div class="px-4 py-1.5 text-[10px] font-bold text-gray-400 bg-[#111827] border-b border-gray-800 flex justify-between items-center">
+                    <span>实时预览 (已合并)</span>
+                    <span class="text-gray-600 font-normal">实际 JSON 载荷</span>
+                </div>
+                <div class="flex-1 overflow-auto p-0 custom-scrollbar bg-[#0d1117]">
+                    <pre class="m-0 p-4 text-xs font-mono leading-relaxed"><code class="language-json" id="configPreview">{}</code></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- COLLECTIONS / PRESETS MODAL -->
+    <div class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" id="collectionsModal">
+        <div class="bg-[#0f1219] w-full max-w-4xl max-h-[85vh] rounded-xl border border-gray-700 flex flex-col overflow-hidden shadow-2xl animate-bounce-in">
+            <div class="h-14 border-b border-gray-800 flex justify-between items-center px-5 bg-[#161b26]">
+                <div class="flex items-center gap-2">
+                    <span class="material-symbols-rounded text-yellow-400">folder_open</span>
+                    <span class="font-bold text-gray-200">库</span>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="importLibrary()" class="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 px-2 py-1 rounded hover:bg-blue-900/20 transition-colors active:scale-95">
+                        <span class="material-symbols-rounded text-sm">upload</span> <span class="hidden sm:inline">导入</span>
+                    </button>
+                    <button onclick="exportLibrary()" class="text-xs text-green-400 hover:text-green-300 flex items-center gap-1 px-2 py-1 rounded hover:bg-green-900/20 transition-colors active:scale-95">
+                        <span class="material-symbols-rounded text-sm">download</span> <span class="hidden sm:inline">导出</span>
+                    </button>
+                    <input type="file" id="importLibFile" class="hidden" accept=".json">
+                    <div class="w-px h-4 bg-gray-700 mx-1"></div>
+                    <button class="text-gray-500 hover:text-white p-1" onclick="toggleCollectionsModal(false)"><span class="material-symbols-rounded">close</span></button>
+                </div>
+            </div>
+            
+            <div class="flex border-b border-gray-800 bg-[#111827]">
+                <button class="flex-1 md:flex-none px-6 py-3 text-xs font-medium text-blue-400 border-b-2 border-blue-500 bg-blue-900/10 focus:outline-none" id="tabPresetsBtn" onclick="switchLibraryTab('presets')">预设 (提示词)</button>
+                <button class="flex-1 md:flex-none px-6 py-3 text-xs font-medium text-gray-400 hover:text-gray-200 focus:outline-none" id="tabChatsBtn" onclick="switchLibraryTab('chats')">已存对话</button>
+                <button class="flex-1 md:flex-none px-6 py-3 text-xs font-medium text-gray-400 hover:text-gray-200 focus:outline-none" id="tabCollectionsBtn" onclick="switchLibraryTab('collections')">已保存合集</button>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-4 custom-scrollbar" id="libraryList">
+                <!-- Dynamic content -->
+            </div>
+        </div>
+    </div>
+
+    <!-- ADVANCED PROMPT BUILDER MODAL -->
+    <div class="fixed inset-0 z-50 hidden bg-black/90 backdrop-blur-sm flex items-center justify-center p-2 md:p-6" id="promptModal">
+        <div class="bg-[#0f1219] w-full max-w-4xl h-[95vh] md:h-[90vh] rounded-xl border border-gray-700 flex flex-col overflow-hidden shadow-2xl animate-bounce-in ring-1 ring-blue-900/30">
+            <div class="h-14 border-b border-gray-800 flex justify-between items-center px-4 md:px-5 bg-[#161b26]">
+                <div class="flex items-center gap-3">
+                    <span class="material-symbols-rounded text-blue-400 text-xl">playlist_add</span>
+                    <div>
+                        <h3 class="font-bold text-gray-200 text-base">构建器</h3>
+                        <p class="text-[10px] text-gray-500 hidden sm:block">系统指令 & 多轮对话</p>
+                    </div>
+                </div>
+                <button class="text-gray-400 hover:text-white p-2 rounded hover:bg-gray-800 transition-colors" onclick="togglePromptModal(false)">
+                    <span class="material-symbols-rounded text-xl">close</span>
+                </button>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto p-4 md:p-6 bg-[#0b0f19] custom-scrollbar space-y-6 pb-safe" id="promptBuilderContainer">
+                <!-- System Instruction -->
+                 <div class="group">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="text-[10px] font-bold text-gray-500 uppercase tracking-wider bg-gray-800 px-2 py-0.5 rounded">系统指令 (System Instruction)</span>
+                    </div>
+                    <textarea id="systemInstructionInput" class="w-full bg-[#111827] border border-gray-700 rounded-lg p-3 text-sm text-gray-300 outline-none focus:border-blue-500 transition-colors resize-y font-mono min-h-[80px]" placeholder="定义模型的角色和约束条件..."></textarea>
+                 </div>
+                 <hr class="border-gray-800/50">
+                 <!-- Messages -->
+                 <div id="builderMessages" class="space-y-4"></div>
+            </div>
+            
+            <!-- Toolbar -->
+            <div class="p-2 border-t border-gray-800 bg-[#0f1219] flex justify-center gap-2">
+                 <button onclick="addBuilderMessage('user')" class="flex items-center gap-2 px-3 md:px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-gray-300 text-xs font-medium transition-colors active:scale-95">
+                    <span class="material-symbols-rounded text-blue-400">person</span> <span class="hidden sm:inline">添加用户</span><span class="sm:hidden">User</span>
+                 </button>
+                 <button onclick="addBuilderMessage('model')" class="flex items-center gap-2 px-3 md:px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-gray-300 text-xs font-medium transition-colors active:scale-95">
+                    <span class="material-symbols-rounded text-purple-400">smart_toy</span> <span class="hidden sm:inline">添加模型</span><span class="sm:hidden">Model</span>
+                 </button>
+            </div>
+
+            <!-- Footer -->
+            <div class="h-16 border-t border-gray-800 bg-[#111827] flex items-center justify-between px-4 md:px-6 pb-safe">
+                <div class="flex gap-3">
+                    <button onclick="clearPrompt()" class="px-4 py-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg text-xs font-medium transition-colors active:scale-95">
+                        清空所有
+                    </button>
+                </div>
+                <div class="flex items-center gap-3">
+                     <button onclick="runFromModal()" class="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold tracking-wide shadow-lg transition-all flex items-center gap-2 active:scale-95">
+                        <span class="material-symbols-rounded text-lg">play_circle</span>
+                        运行
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- LIGHTBOX MODAL -->
+    <div class="fixed inset-0 z-50 hidden bg-black/95 backdrop-blur-md flex items-center justify-center opacity-0 transition-opacity duration-300" id="lightbox" onclick="closeLightbox()">
+        <div class="absolute top-4 right-4 flex gap-2 z-10">
+            <button class="text-white/70 hover:text-blue-400 p-2 bg-gray-800/80 rounded-full backdrop-blur transition-colors active:scale-95" onclick="event.stopPropagation(); downloadCurrentLightboxImage()">
+                <span class="material-symbols-rounded text-2xl">download</span>
+            </button>
+            <button class="text-white/70 hover:text-red-400 p-2 bg-gray-800/80 rounded-full backdrop-blur transition-colors active:scale-95" onclick="closeLightbox()">
+                <span class="material-symbols-rounded text-2xl">close</span>
+            </button>
+        </div>
+        <!-- Lightbox Navigation Arrows -->
+        <button id="lightboxPrevBtn" class="absolute left-4 top-1/2 -translate-y-1/2 text-white/70 hover:text-blue-400 p-2 bg-gray-800/80 rounded-full backdrop-blur transition-colors active:scale-95 z-10" onclick="event.stopPropagation(); navigateLightbox(-1)" title="上一张">
+            <span class="material-symbols-rounded text-3xl">chevron_left</span>
+        </button>
+        <button id="lightboxNextBtn" class="absolute right-4 top-1/2 -translate-y-1/2 text-white/70 hover:text-blue-400 p-2 bg-gray-800/80 rounded-full backdrop-blur transition-colors active:scale-95 z-10" onclick="event.stopPropagation(); navigateLightbox(1)" title="下一张">
+            <span class="material-symbols-rounded text-3xl">chevron_right</span>
+        </button>
+        <img class="max-w-[95vw] max-h-[90vh] object-contain rounded-md shadow-2xl transform scale-95 transition-transform duration-300" id="lightboxImg" onclick="event.stopPropagation()" src=""/>
+    </div>
+
+    <!-- RAW DATA MODAL -->
+    <div class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" id="rawModal">
+        <div class="bg-[#0f1219] w-full max-w-5xl h-[85vh] rounded-xl border border-gray-700 flex flex-col overflow-hidden shadow-2xl">
+            <div class="h-12 border-b border-gray-800 flex justify-between items-center px-4 bg-[#161b26]">
+                <div class="flex items-center gap-2">
+                     <span class="material-symbols-rounded text-blue-400">data_object</span>
+                     <span class="font-mono text-xs font-bold text-gray-300">原始数据 (RAW DATA)</span>
+                </div>
+                <button class="text-gray-500 hover:text-white transition-colors p-2 rounded hover:bg-gray-800" onclick="toggleRawModal(false)"><span class="material-symbols-rounded">close</span></button>
+            </div>
+            <div class="flex-1 flex flex-col md:flex-row overflow-hidden bg-[#0d1117]">
+                <div class="w-full md:w-1/2 border-b md:border-b-0 md:border-r border-gray-800 flex flex-col h-1/2 md:h-auto">
+                    <div class="px-3 py-2 border-b border-gray-800 bg-[#161b26]/50 text-xs font-bold text-purple-400 font-mono">请求 (REQUEST)</div>
+                    <div class="flex-1 overflow-auto p-0 custom-scrollbar"><pre class="m-0 p-4 text-xs font-mono leading-relaxed"><code class="language-json" id="rawReqCode"></code></pre></div>
+                </div>
+                <div class="w-full md:w-1/2 flex flex-col h-1/2 md:h-auto">
+                    <div class="px-3 py-2 border-b border-gray-800 bg-[#161b26]/50 text-xs font-bold text-green-400 font-mono">响应 (RESPONSE)</div>
+                    <div class="flex-1 overflow-auto p-0 custom-scrollbar"><pre class="m-0 p-4 text-xs font-mono leading-relaxed"><code class="language-json" id="rawResCode"></code></pre></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- AUTH MODAL -->
+    <div class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" id="authModal">
+        <div class="bg-[#0f1219] w-full max-w-md rounded-xl border border-gray-700 shadow-2xl overflow-hidden">
+            <div class="h-12 border-b border-gray-800 flex justify-between items-center px-4 bg-[#161b26]">
+                <div class="flex items-center gap-2">
+                    <span class="material-symbols-rounded text-blue-400">person</span>
+                    <span class="font-mono text-xs font-bold text-gray-300">账户</span>
+                </div>
+                <button class="text-gray-500 hover:text-white transition-colors p-2 rounded hover:bg-gray-800" onclick="toggleAuthModal(false)"><span class="material-symbols-rounded">close</span></button>
+            </div>
+            <div class="p-5 space-y-4">
+                <div class="flex gap-2">
+                    <button id="authTabLogin" type="button" class="flex-1 py-2 rounded-lg border bg-blue-600 border-blue-500 text-white text-xs font-medium transition-colors active:scale-95" onclick="switchAuthMode('login')">登录</button>
+                    <button id="authTabRegister" type="button" class="flex-1 py-2 rounded-lg border bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800 text-xs font-medium transition-colors active:scale-95" onclick="switchAuthMode('register')">注册</button>
+                </div>
+
+                <div class="space-y-3">
+                    <div class="space-y-1.5">
+                        <label class="text-[10px] text-gray-400 font-medium uppercase">用户名</label>
+                        <input id="authUsername" class="w-full input-dark rounded-lg px-3 py-2 text-sm" placeholder="3-32 位字母/数字/_/-" autocomplete="username" />
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="text-[10px] text-gray-400 font-medium uppercase">密码</label>
+                        <input id="authPassword" type="password" class="w-full input-dark rounded-lg px-3 py-2 text-sm" placeholder="至少 6 位" autocomplete="current-password" />
+                    </div>
+                    <div class="flex items-center justify-between gap-3 pt-2">
+                        <div class="text-[10px] text-gray-500" id="authHint">将使用 Cookie 保持登录状态</div>
+                        <button id="authSubmitBtn" class="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold tracking-wide shadow-lg transition-all active:scale-95" onclick="submitAuth()">登录</button>
+                    </div>
+                </div>
+
+                <div class="text-[10px] text-red-200 hidden" id="authError"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden File Input for Builder Rows -->
+    <input type="file" id="builderRowInput" class="hidden" accept="image/*" multiple>
+
+    <script src="assets/app.js"></script>
+</body>
+</html>

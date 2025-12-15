@@ -1,0 +1,279 @@
+body { background-color: #0b0f19; color: #cbd5e1; font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+html:not(.dark) body { background-color: #ffffff; color: #111827; }
+/* Black & White */
+html.bw { filter: grayscale(100%); }
+
+/* Light theme overrides to counter fixed dark utility classes */
+html:not(.dark) main { background-color: #ffffff !important; background-image: radial-gradient(circle at top right, rgba(241,245,249,0.6), transparent 50%) !important; }
+html:not(.dark) header { background-color: rgba(255,255,255,0.8) !important; border-color: #e5e7eb !important; }
+html:not(.dark) #leftSidebar { background-color: #ffffff !important; border-color: #e5e7eb !important; }
+html:not(.dark) #chatDrawer { background-color: #ffffff !important; }
+html:not(.dark) .glass-panel { background: rgba(255,255,255,0.7) !important; border-color: rgba(229,231,235,0.8) !important; }
+html:not(.dark) .input-dark { background-color: #f9fafb !important; border-color: #e5e7eb !important; color: #111827 !important; }
+html:not(.dark) .input-dark:focus { background-color: #ffffff !important; border-color: #3b82f6 !important; box-shadow: 0 0 0 1px rgba(59,130,246,0.3) !important; }
+html:not(.dark) .prose pre { background: #f6f8fa !important; border-color: #e5e7eb !important; }
+html:not(.dark) .prose code { color: #111827 !important; }
+/* prose-invert content back to light mode */
+html:not(.dark) .prose-invert { color: #111827 !important; }
+html:not(.dark) .prose-invert pre { background: #f6f8fa !important; border-color: #e5e7eb !important; }
+html:not(.dark) .prose-invert code { color: #111827 !important; }
+
+/* Make modal panels light while keeping black overlays as-is */
+html:not(.dark) #configModal > div,
+html:not(.dark) #collectionsModal > div,
+html:not(.dark) #promptModal > div,
+html:not(.dark) #rawModal > div { background-color: #ffffff !important; }
+
+/* Generic overrides for arbitrary dark bg/border/text utilities */
+html:not(.dark) [class*="bg-[#0b0f19]"],
+html:not(.dark) [class*="bg-[#0f1219]"],
+html:not(.dark) [class*="bg-[#0d1117]"],
+html:not(.dark) [class*="bg-[#111827]"],
+html:not(.dark) [class*="bg-[#161b26]"],
+html:not(.dark) [class*="bg-[#080b12]"],
+html:not(.dark) [class*="bg-[#1f2937]"],
+html:not(.dark) [class*="bg-gray-900"],
+html:not(.dark) [class*="bg-gray-800"],
+html:not(.dark) [class*="bg-gray-700"],
+html:not(.dark) [class*="bg-gray-600"] { background-color: #ffffff !important; }
+
+html:not(.dark) [class*="border-gray-900"],
+html:not(.dark) [class*="border-gray-800"],
+html:not(.dark) [class*="border-gray-700"],
+html:not(.dark) [class*="border-gray-600"] { border-color: #e5e7eb !important; }
+
+html:not(.dark) [class*="text-gray-200"],
+html:not(.dark) [class*="text-gray-300"],
+html:not(.dark) [class*="text-gray-400"] { color: #111827 !important; }
+html:not(.dark) [class*="text-gray-500"] { color: #374151 !important; }
+html:not(.dark) .bg-gray-700[type="range"] { background-color: #e5e7eb !important; }
+
+/* Light content surfaces that used translucent black backgrounds */
+html:not(.dark) [class*="bg-black/20"],
+html:not(.dark) [class*="bg-black/30"],
+html:not(.dark) [class*="bg-black/60"] { background-color: #ffffff !important; }
+
+/* Keep heavy overlays dark in light theme */
+html:not(.dark) #lightbox { background-color: rgba(0,0,0,0.95) !important; }
+html:not(.dark) #mobileSidebarBackdrop { background-color: rgba(0,0,0,0.60) !important; }
+html:not(.dark) #dragOverlay { background-color: rgba(59,130,246,0.1) !important; }
+html:not(.dark) #lightbox button { color: #111827 !important; background-color: rgba(255,255,255,0.8) !important; }
+html:not(.dark) .text-red-200 { color: #dc2626 !important; /* Deeper red for light mode errors */ }
+
+/* Stopped state banners (dark + light) */
+.stopped-banner {
+    background-color: rgba(251, 191, 36, 0.10);
+    border: 1px solid rgba(252, 211, 77, 0.70);
+    color: #FDE68A;
+}
+html:not(.dark) .stopped-banner {
+    background-color: #FEF3C7;
+    border-color: #F59E0B;
+    color: #92400E !important;
+}
+html:not(.dark) .stopped-status {
+    color: #b45309 !important;
+}
+
+/* Fix image preview hover in light mode */
+html:not(.dark) #previewStrip .group:hover button { background-color: rgba(0,0,0,0.5) !important; color: #ffffff !important; }
+
+/* Custom Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+/* Glass & Inputs */
+.glass-panel {
+    background: rgba(17, 24, 39, 0.7);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(55, 65, 81, 0.5);
+}
+.input-dark {
+    background-color: rgba(31, 41, 55, 0.5);
+    border: 1px solid #374151;
+    color: #e2e8f0;
+    transition: all 0.2s;
+}
+.input-dark:focus {
+    border-color: #3b82f6;
+    background-color: rgba(31, 41, 55, 0.9);
+    outline: none;
+    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.3);
+}
+
+/* Checkbox Custom */
+.custom-checkbox {
+    appearance: none;
+    background-color: rgba(31, 41, 55, 0.5);
+    margin: 0;
+    font: inherit;
+    color: currentColor;
+    width: 1.15em;
+    height: 1.15em;
+    border: 1px solid #4b5563;
+    border-radius: 0.25em;
+    display: grid;
+    place-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.custom-checkbox::before {
+    content: "";
+    width: 0.65em;
+    height: 0.65em;
+    transform: scale(0);
+    transition: 120ms transform ease-in-out;
+    box-shadow: inset 1em 1em white;
+    background-color: white;
+    transform-origin: center;
+    clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+}
+.custom-checkbox:checked {
+    background-color: #3b82f6;
+    border-color: #3b82f6;
+}
+.custom-checkbox:checked::before {
+    transform: scale(1);
+}
+
+/* Markdown */
+.prose { font-size: 0.9rem; line-height: 1.6; }
+.prose pre { background: #0d1117 !important; padding: 0.75rem; border-radius: 0.5rem; border: 1px solid #30363d; margin: 0.5rem 0; overflow-x: auto; }
+.prose code { font-family: 'JetBrains Mono', monospace; color: #e2e8f0; }
+.prose p { margin-bottom: 0.5rem; }
+.prose ul { list-style-type: disc; padding-left: 1.2rem; margin-bottom: 0.5rem; }
+
+/* Drag Overlay */
+#dragOverlay {
+    pointer-events: none;
+    background: rgba(59, 130, 246, 0.1);
+    border: 2px dashed #3b82f6;
+    backdrop-filter: blur(4px);
+}
+
+/* Builder Drop Zone Active State */
+.builder-drop-active {
+    border-color: #3b82f6 !important;
+    background-color: rgba(59, 130, 246, 0.05) !important;
+}
+
+.line-clamp-6 {
+    display: -webkit-box;
+    -webkit-line-clamp: 6;
+    -webkit-box-orient: vertical;
+    line-clamp: 6;
+    overflow: hidden;
+}
+textarea { field-sizing: content; }
+
+.aspect-ratio-preview {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 6px;
+    flex-shrink: 0;
+}
+.aspect-ratio-preview > div {
+    background-color: #9ca3af;
+    border-radius: 1px;
+    transition: background-color 0.2s;
+}
+html:not(.dark) .aspect-ratio-preview > div {
+    background-color: #6b7280;
+}
+button[aria-pressed="true"] .aspect-ratio-preview > div {
+    background-color: white;
+}
+/* Mobile Safe Area */
+.pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+
+/* Card size presets for session panels */
+.card-size-sm {
+    height: 280px;
+}
+@media (min-width: 768px) {
+    .card-size-sm {
+        height: 340px;
+    }
+}
+.card-size-md {
+    height: 380px;
+}
+@media (min-width: 768px) {
+    .card-size-md {
+        height: 500px;
+    }
+}
+.card-size-lg {
+    height: 460px;
+}
+@media (min-width: 768px) {
+    .card-size-lg {
+        height: 620px;
+    }
+}
+
+/* Session card header responsive layout */
+.session-card-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    row-gap: 4px;
+    height: auto;
+    min-height: 3rem;
+}
+.session-card-header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+}
+.session-card-header-left > div {
+    min-width: 0;
+}
+.session-card-header-right {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+.session-card-header-right > button {
+    padding: 0.2rem 0.25rem;
+}
+
+/* Extra mobile layout tuning to avoid buttons overflowing on very small screens */
+@media (max-width: 640px) {
+    /* Keep builder indicator on its own row when visible, but avoid expanding other controls too much */
+    #builderActiveIndicator {
+        flex: 0 0 100%;
+    }
+
+    /* Prevent run button from shrinking too small, keep it visually stable */
+    #runBtn {
+        flex-shrink: 0;
+    }
+
+    /* Bottom multi-select toolbar: keep fully visible and slightly higher on phones */
+    #selectionToolbar {
+        width: 100%;
+        max-width: calc(100% - 1.5rem);
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+        overflow-x: auto;
+        bottom: 4.5rem;
+    }
+
+    #selectionToolbar > div {
+        flex-wrap: nowrap;
+    }
+
+    #selectionToolbar button {
+        white-space: nowrap;
+    }
+}

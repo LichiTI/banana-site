@@ -1,0 +1,11 @@
+{
+  "name": "banana-vps-server",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Zero-dependency Node.js backend for banana.html (auth, admin, storage).",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  }
+}
+
