@@ -10,8 +10,39 @@ const ROOT = path.resolve(__dirname, '..');
 const DATA_ROOT = path.join(ROOT, 'data');
 const USERS_ROOT = path.join(DATA_ROOT, 'users');
 const MAX_BODY_BYTES = 50 * 1024 * 1024; // allow base64 images
-const HISTORY_LIMIT = 50;
 const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024;
+const DEFAULT_GALLERY_QUOTA_BYTES = 1024 * 1024 * 1024; // 1 GiB
+
+function loadEnvFileIfPresent(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return;
+    const text = fs.readFileSync(filePath, 'utf8');
+    text.split(/\r?\n/).forEach((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) return;
+      const idx = trimmed.indexOf('=');
+      if (idx === -1) return;
+      const key = trimmed.slice(0, idx).trim();
+      let value = trimmed.slice(idx + 1).trim();
+      if (!key) return;
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      if (process.env[key] === undefined) {
+        process.env[key] = value;
+      }
+    });
+  } catch {
+    // ignore .env parsing errors
+  }
+}
+
+// Load env files (no external deps). Precedence: real env > server/.env > root .env
+loadEnvFileIfPresent(path.join(ROOT, 'server', '.env'));
+loadEnvFileIfPresent(path.join(ROOT, '.env'));
 
 function base64urlEncode(input) {
   const buf = Buffer.isBuffer(input) ? input : Buffer.from(String(input), 'utf8');
@@ -156,15 +187,27 @@ function verifyToken(secret, token) {
   }
 }
 
-function setAuthCookie(res, token) {
-  const isDev = (process.env.NODE_ENV || '').toLowerCase() !== 'production';
+function isRequestSecure(req) {
+  try {
+    if (req.socket && req.socket.encrypted) return true;
+    const xfProto = String(req.headers['x-forwarded-proto'] || '').toLowerCase();
+    if (xfProto === 'https') return true;
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
+function setAuthCookie(req, res, token) {
+  const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+  const shouldSecure = isProd ? isRequestSecure(req) : false;
   const parts = [
     `banana_token=${encodeURIComponent(token)}`,
     'Path=/',
     'HttpOnly',
     'SameSite=Lax',
   ];
-  if (!isDev) parts.push('Secure');
+  if (shouldSecure) parts.push('Secure');
   res.setHeader('Set-Cookie', parts.join('; '));
 }
 
@@ -194,6 +237,98 @@ async function listUsers() {
 async function loadUserMeta(username) {
   const metaPath = path.join(USERS_ROOT, username, 'meta.json');
   return await readJson(metaPath, null);
+}
+
+async function isAdminUser(username) {
+  const meta = await loadUserMeta(username);
+  return !!meta?.isAdmin;
+}
+
+async function readUsage(username) {
+  const usagePath = path.join(USERS_ROOT, username, 'usage.json');
+  const fallback = { uploadsBytes: 0, generatedBytes: 0, updatedAt: nowIso() };
+  const usage = await readJson(usagePath, fallback);
+  return {
+    uploadsBytes: Number(usage.uploadsBytes || 0),
+    generatedBytes: Number(usage.generatedBytes || 0),
+    updatedAt: usage.updatedAt || nowIso(),
+  };
+}
+
+async function writeUsage(username, usage) {
+  const usagePath = path.join(USERS_ROOT, username, 'usage.json');
+  await writeJsonAtomic(usagePath, { ...usage, updatedAt: nowIso() });
+}
+
+async function statDirBytes(dirPath) {
+  try {
+    const entries = await fsp.readdir(dirPath, { withFileTypes: true });
+    let total = 0;
+    for (const e of entries) {
+      if (!e.isFile()) continue;
+      try {
+        const s = await fsp.stat(path.join(dirPath, e.name));
+        total += s.size;
+      } catch {
+        // ignore
+      }
+    }
+    return total;
+  } catch (e) {
+    if (e.code === 'ENOENT') return 0;
+    throw e;
+  }
+}
+
+async function recomputeUsage(username) {
+  const uploadsDir = path.join(USERS_ROOT, username, 'uploads');
+  const generatedDir = path.join(USERS_ROOT, username, 'generated');
+  const uploadsBytes = await statDirBytes(uploadsDir);
+  const generatedBytes = await statDirBytes(generatedDir);
+  const usage = { uploadsBytes, generatedBytes, updatedAt: nowIso() };
+  await writeUsage(username, usage);
+  return usage;
+}
+
+async function getQuotaBytes(username) {
+  if (await isAdminUser(username)) return null;
+  const quotaPath = path.join(USERS_ROOT, username, 'quota.json');
+  const quota = await readJson(quotaPath, null);
+  const q = Number(quota?.galleryBytes);
+  if (Number.isFinite(q) && q > 0) return q;
+  return DEFAULT_GALLERY_QUOTA_BYTES;
+}
+
+async function assertGalleryHasSpace(username, kind, incomingBytes) {
+  if (!['uploads', 'generated'].includes(kind)) return;
+  const quotaBytes = await getQuotaBytes(username);
+  if (quotaBytes == null) return; // admin unlimited
+
+  const inc = Number.isFinite(incomingBytes) ? Math.max(0, incomingBytes) : 0;
+  let usage = await readUsage(username);
+  const used = usage.uploadsBytes + usage.generatedBytes;
+  if (used + inc <= quotaBytes) return;
+
+  // Try recompute once in case usage.json is stale
+  usage = await recomputeUsage(username);
+  const used2 = usage.uploadsBytes + usage.generatedBytes;
+  if (used2 + inc <= quotaBytes) return;
+
+  const left = Math.max(0, quotaBytes - used2);
+  const err = new Error(
+    `图库容量不足：剩余 ${(left / (1024 ** 3)).toFixed(2)}GB / 总 ${(quotaBytes / (1024 ** 3)).toFixed(2)}GB`,
+  );
+  err.statusCode = 507;
+  throw err;
+}
+
+async function addUsage(username, kind, bytes) {
+  if (!['uploads', 'generated'].includes(kind)) return;
+  const usage = await readUsage(username);
+  const b = Number.isFinite(bytes) ? Math.max(0, bytes) : 0;
+  if (kind === 'uploads') usage.uploadsBytes += b;
+  if (kind === 'generated') usage.generatedBytes += b;
+  await writeUsage(username, usage);
 }
 
 async function saveUserMeta(username, meta) {
@@ -333,6 +468,35 @@ async function copyFileIfExists(src, dst) {
   await fsp.copyFile(src, dst);
 }
 
+async function listUserImages(username, kind, limit = 200, cursor = null) {
+  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(1000, limit)) : 200;
+  const dir = path.join(USERS_ROOT, username, kind);
+  await ensureDir(dir);
+  const entries = await fsp.readdir(dir, { withFileTypes: true });
+  const files = [];
+  for (const e of entries) {
+    if (!e.isFile()) continue;
+    const name = e.name;
+    const abs = path.join(dir, name);
+    try {
+      const stat = await fsp.stat(abs);
+      files.push({ name, mtimeMs: stat.mtimeMs, size: stat.size });
+    } catch {
+      // ignore
+    }
+  }
+  files.sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+  let startIdx = 0;
+  if (cursor) {
+    const idx = files.findIndex((f) => f.name === cursor);
+    startIdx = idx >= 0 ? idx + 1 : 0;
+  }
+  const page = files.slice(startIdx, startIdx + safeLimit);
+  const nextCursor = page.length ? page[page.length - 1].name : null;
+  return { items: page, nextCursor };
+}
+
 async function main() {
   await ensureDir(USERS_ROOT);
   const secret = await loadOrCreateSecret();
@@ -382,15 +546,34 @@ async function main() {
         const userRoot = path.join(USERS_ROOT, username);
         const filePath = path.join(userRoot, rel);
         if (!filePath.startsWith(userRoot)) return sendText(res, 400, 'Bad path');
-        res.writeHead(200, {
-          'content-type': guessContentTypeByExt(filePath),
-          'cache-control': 'private, max-age=3600',
-        });
-        return fs.createReadStream(filePath).on('error', (e) => {
+        try {
+          const stat = await fsp.stat(filePath);
+          if (!stat.isFile()) return sendText(res, 404, 'Not found');
+          const etag = `W/\"${stat.size}-${Math.floor(stat.mtimeMs)}\"`;
+          const inm = req.headers['if-none-match'];
+          if (inm && String(inm) === etag) {
+            res.writeHead(304, {
+              ETag: etag,
+              'cache-control': 'private, max-age=3600',
+            });
+            return res.end();
+          }
+          res.writeHead(200, {
+            'content-type': guessContentTypeByExt(filePath),
+            'cache-control': 'private, max-age=3600',
+            ETag: etag,
+            'last-modified': new Date(stat.mtimeMs).toUTCString(),
+          });
+          return fs.createReadStream(filePath).on('error', (e) => {
+            if (e.code === 'ENOENT') return sendText(res, 404, 'Not found');
+            console.error(e);
+            return sendText(res, 500, 'Internal error');
+          }).pipe(res);
+        } catch (e) {
           if (e.code === 'ENOENT') return sendText(res, 404, 'Not found');
           console.error(e);
           return sendText(res, 500, 'Internal error');
-        }).pipe(res);
+        }
       }
 
       // API
@@ -434,6 +617,7 @@ async function main() {
         await ensureDir(path.join(USERS_ROOT, username, 'generated'));
         await ensureDir(path.join(USERS_ROOT, username, 'favorites'));
         await ensureDir(path.join(USERS_ROOT, username, 'history'));
+        await writeUsage(username, { uploadsBytes: 0, generatedBytes: 0, updatedAt: nowIso() });
         return sendJson(res, 200, { ok: true, isAdmin: firstUserBecomesAdmin });
       }
 
@@ -451,7 +635,7 @@ async function main() {
           a: !!meta.isAdmin,
           exp: Date.now() + 7 * 24 * 60 * 60 * 1000,
         });
-        setAuthCookie(res, token);
+        setAuthCookie(req, res, token);
         return sendJson(res, 200, { ok: true, user: { username, isAdmin: !!meta.isAdmin } });
       }
 
@@ -468,11 +652,13 @@ async function main() {
         if (!['uploads', 'generated'].includes(kind)) return sendJson(res, 400, { error: 'Invalid kind' });
         const parsed = parseDataUrl(body.dataUrl);
         if (!parsed) return sendJson(res, 400, { error: 'Invalid dataUrl' });
+        await assertGalleryHasSpace(auth.u, kind, parsed.buf.length);
         const ext = mimeToExt(parsed.mime);
         const fileName = `${Date.now()}_${crypto.randomBytes(6).toString('hex')}.${ext}`;
         const absPath = path.join(USERS_ROOT, auth.u, kind, fileName);
         await ensureDir(path.dirname(absPath));
         await fsp.writeFile(absPath, parsed.buf);
+        await addUsage(auth.u, kind, parsed.buf.length);
         const fileUri = `/files/${encodeURIComponent(auth.u)}/${kind}/${encodeURIComponent(fileName)}`;
         return sendJson(res, 200, { fileUri, mime: parsed.mime });
       }
@@ -482,9 +668,17 @@ async function main() {
         if (!auth) return sendJson(res, 401, { error: 'Unauthorized' });
         const body = await readJsonBody(req);
         const kind = String(body.kind || '').toLowerCase();
-        if (!['generated'].includes(kind)) return sendJson(res, 400, { error: 'Invalid kind' });
+        if (!['uploads', 'generated'].includes(kind)) return sendJson(res, 400, { error: 'Invalid kind' });
         const images = Array.isArray(body.images) ? body.images : [];
         const out = [];
+
+        let totalBytes = 0;
+        for (const img of images) {
+          const parsed = parseDataUrl(img?.dataUrl);
+          if (parsed) totalBytes += parsed.buf.length;
+        }
+        await assertGalleryHasSpace(auth.u, kind, totalBytes);
+
         for (const img of images) {
           const parsed = parseDataUrl(img?.dataUrl);
           if (!parsed) {
@@ -496,10 +690,51 @@ async function main() {
           const absPath = path.join(USERS_ROOT, auth.u, kind, fileName);
           await ensureDir(path.dirname(absPath));
           await fsp.writeFile(absPath, parsed.buf);
+          await addUsage(auth.u, kind, parsed.buf.length);
           const fileUri = `/files/${encodeURIComponent(auth.u)}/${kind}/${encodeURIComponent(fileName)}`;
           out.push({ fileUri, mime: parsed.mime });
         }
         return sendJson(res, 200, { items: out });
+      }
+
+      if (pathname === '/api/images/list' && req.method === 'GET') {
+        const auth = requireAuth(secret, req);
+        if (!auth) return sendJson(res, 401, { error: 'Unauthorized' });
+        const kind = String(url.searchParams.get('kind') || '').toLowerCase();
+        if (!['uploads', 'generated'].includes(kind)) return sendJson(res, 400, { error: 'Invalid kind' });
+        const limit = parseInt(url.searchParams.get('limit') || '200', 10);
+        const cursor = url.searchParams.get('cursor');
+        const { items, nextCursor } = await listUserImages(auth.u, kind, limit, cursor);
+        const out = items.map((f) => ({
+          name: f.name,
+          size: f.size,
+          mtimeMs: f.mtimeMs,
+          fileUri: `/files/${encodeURIComponent(auth.u)}/${kind}/${encodeURIComponent(f.name)}`,
+        }));
+        return sendJson(res, 200, { items: out, nextCursor });
+      }
+
+      if (pathname === '/api/storage/usage' && req.method === 'GET') {
+        const auth = requireAuth(secret, req);
+        if (!auth) return sendJson(res, 401, { error: 'Unauthorized' });
+        const quotaBytes = await getQuotaBytes(auth.u);
+        let usage = await readUsage(auth.u);
+        if ((usage.uploadsBytes + usage.generatedBytes) === 0) {
+          const uploadsDir = path.join(USERS_ROOT, auth.u, 'uploads');
+          const generatedDir = path.join(USERS_ROOT, auth.u, 'generated');
+          const hasAny =
+            (await statDirBytes(uploadsDir)) > 0 ||
+            (await statDirBytes(generatedDir)) > 0;
+          if (hasAny) usage = await recomputeUsage(auth.u);
+        }
+        const usedBytes = usage.uploadsBytes + usage.generatedBytes;
+        return sendJson(res, 200, {
+          quotaBytes,
+          usedBytes,
+          uploadsBytes: usage.uploadsBytes,
+          generatedBytes: usage.generatedBytes,
+          updatedAt: usage.updatedAt,
+        });
       }
 
       if (pathname === '/api/images/fetch' && req.method === 'POST') {
@@ -514,12 +749,14 @@ async function main() {
         const { buf, contentType } = await fetchUrlBuffer(urlStr);
         const mime = (contentType.split(';')[0] || '').trim().toLowerCase();
         if (!mime.startsWith('image/')) return sendJson(res, 400, { error: `Not an image: ${mime || 'unknown'}` });
+        await assertGalleryHasSpace(auth.u, kind, buf.length);
 
         const ext = mimeToExt(mime) || 'png';
         const fileName = `${Date.now()}_${crypto.randomBytes(6).toString('hex')}.${ext}`;
         const absPath = path.join(USERS_ROOT, auth.u, kind, fileName);
         await ensureDir(path.dirname(absPath));
         await fsp.writeFile(absPath, buf);
+        await addUsage(auth.u, kind, buf.length);
         const fileUri = `/files/${encodeURIComponent(auth.u)}/${kind}/${encodeURIComponent(fileName)}`;
         return sendJson(res, 200, { fileUri, mime });
       }
@@ -668,29 +905,7 @@ async function main() {
         return sendJson(res, 200, { ok: true });
       }
 
-      if (pathname === '/api/history/sessions/add' && req.method === 'POST') {
-        const auth = requireAuth(secret, req);
-        if (!auth) return sendJson(res, 401, { error: 'Unauthorized' });
-        const body = await readJsonBody(req);
-        const meta = await loadUserMeta(auth.u);
-        const isAdmin = !!meta?.isAdmin;
-        const entry = body?.entry;
-        if (!entry || typeof entry !== 'object') return sendJson(res, 400, { error: 'Invalid entry' });
-        const historyPath = path.join(USERS_ROOT, auth.u, 'history', 'sessions.json');
-        const list = await readJson(historyPath, []);
-        list.unshift({ ...entry, savedAt: nowIso() });
-        const trimmed = isAdmin ? list : list.slice(0, HISTORY_LIMIT);
-        await writeJsonAtomic(historyPath, trimmed);
-        return sendJson(res, 200, { ok: true, count: trimmed.length, limit: isAdmin ? null : HISTORY_LIMIT });
-      }
-
-      if (pathname === '/api/history/sessions' && req.method === 'GET') {
-        const auth = requireAuth(secret, req);
-        if (!auth) return sendJson(res, 401, { error: 'Unauthorized' });
-        const historyPath = path.join(USERS_ROOT, auth.u, 'history', 'sessions.json');
-        const list = await readJson(historyPath, []);
-        return sendJson(res, 200, { items: list });
-      }
+      // 已移除“未收藏聊天记录云端同步”相关 API（history/*）。
 
       if (pathname === '/api/admin/users' && req.method === 'GET') {
         const auth = requireAuth(secret, req);

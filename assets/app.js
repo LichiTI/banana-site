@@ -71,6 +71,25 @@ function isHttpUrl(uri) {
     return typeof uri === 'string' && (uri.startsWith('http://') || uri.startsWith('https://'));
 }
 
+async function mapWithConcurrency(items, limit, mapper) {
+    const arr = Array.isArray(items) ? items : [];
+    const cap = Math.max(1, Math.min(8, Number(limit) || 3));
+    const results = new Array(arr.length);
+    let nextIndex = 0;
+
+    async function worker() {
+        while (true) {
+            const i = nextIndex++;
+            if (i >= arr.length) return;
+            results[i] = await mapper(arr[i], i);
+        }
+    }
+
+    const workers = Array.from({ length: Math.min(cap, arr.length) }, () => worker());
+    await Promise.all(workers);
+    return results;
+}
+
 async function apiFetchJson(apiPath, options = {}) {
     if (runtime.serverAvailable === false) {
         throw new Error('Server unavailable');
@@ -319,6 +338,17 @@ const dom = {
     authSubmitBtn: document.getElementById('authSubmitBtn'),
     authError: document.getElementById('authError'),
     authHint: document.getElementById('authHint')
+    ,
+
+    // Cloud images
+    cloudImagesBtn: document.getElementById('cloudImagesBtn'),
+    cloudImagesModal: document.getElementById('cloudImagesModal'),
+    cloudTabUploads: document.getElementById('cloudTabUploads'),
+    cloudTabGenerated: document.getElementById('cloudTabGenerated'),
+    cloudImagesGrid: document.getElementById('cloudImagesGrid'),
+    cloudImagesEmpty: document.getElementById('cloudImagesEmpty'),
+    cloudImagesLoadMore: document.getElementById('cloudImagesLoadMore'),
+    cloudUsageLabel: document.getElementById('cloudUsageLabel')
 };
 
 function setAuthError(message) {
@@ -338,6 +368,7 @@ function updateAuthUI() {
     if (dom.logoutBtn) dom.logoutBtn.classList.toggle('hidden', !authed);
     if (dom.loginBtn) dom.loginBtn.classList.toggle('hidden', authed);
     if (dom.registerBtn) dom.registerBtn.classList.toggle('hidden', authed);
+    if (dom.cloudImagesBtn) dom.cloudImagesBtn.classList.toggle('hidden', !authed);
 
     if (dom.authUserLabel) dom.authUserLabel.textContent = authed ? runtime.me.username : 'guest';
     if (dom.authAdminBadge) dom.authAdminBadge.classList.toggle('hidden', !isAdmin());
@@ -393,6 +424,126 @@ async function loadFavoritesFromServer() {
     state.presets = Array.isArray(presets.items) ? presets.items : [];
     state.savedChats = Array.isArray(chats.items) ? chats.items : [];
     state.collections = Array.isArray(collections.items) ? collections.items : [];
+}
+
+// 已移除“未收藏聊天记录云端同步”功能：仅收藏（预设/对话/合集）会同步到服务器。
+
+const cloudImagesState = {
+    tab: 'uploads',
+    cursor: null,
+    loading: false,
+    usageLoading: false
+};
+
+function formatBytes(bytes) {
+    const b = Number(bytes || 0);
+    if (b >= 1024 ** 3) return `${(b / (1024 ** 3)).toFixed(2)}GB`;
+    if (b >= 1024 ** 2) return `${(b / (1024 ** 2)).toFixed(1)}MB`;
+    if (b >= 1024) return `${(b / 1024).toFixed(1)}KB`;
+    return `${Math.max(0, Math.floor(b))}B`;
+}
+
+async function refreshCloudUsage() {
+    if (!isAuthed() || !dom.cloudUsageLabel || cloudImagesState.usageLoading) return;
+    cloudImagesState.usageLoading = true;
+    try {
+        const res = await apiFetchJson('/api/storage/usage');
+        const used = Number(res.usedBytes || 0);
+        const quota = res.quotaBytes;
+        if (quota == null) {
+            dom.cloudUsageLabel.textContent = `已用 ${formatBytes(used)} / 不限（ADMIN）`;
+        } else {
+            dom.cloudUsageLabel.textContent = `已用 ${formatBytes(used)} / ${formatBytes(quota)}（上传+生成）`;
+        }
+    } catch (e) {
+        dom.cloudUsageLabel.textContent = '';
+    } finally {
+        cloudImagesState.usageLoading = false;
+    }
+}
+
+function switchCloudImagesTab(tab) {
+    cloudImagesState.tab = tab === 'generated' ? 'generated' : 'uploads';
+    if (dom.cloudTabUploads && dom.cloudTabGenerated) {
+        const uploadsActive = cloudImagesState.tab === 'uploads';
+        dom.cloudTabUploads.className = uploadsActive
+            ? 'px-3 py-1.5 rounded-lg border bg-blue-600 border-blue-500 text-white text-xs font-medium transition-colors active:scale-95'
+            : 'px-3 py-1.5 rounded-lg border bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800 text-xs font-medium transition-colors active:scale-95';
+        dom.cloudTabGenerated.className = !uploadsActive
+            ? 'px-3 py-1.5 rounded-lg border bg-blue-600 border-blue-500 text-white text-xs font-medium transition-colors active:scale-95'
+            : 'px-3 py-1.5 rounded-lg border bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800 text-xs font-medium transition-colors active:scale-95';
+    }
+    refreshCloudImages().catch(() => {});
+}
+
+function toggleCloudImagesModal(show) {
+    if (!dom.cloudImagesModal) return;
+    dom.cloudImagesModal.classList.toggle('hidden', !show);
+    if (show) {
+        refreshCloudUsage().catch(() => {});
+        refreshCloudImages().catch(() => {});
+    }
+}
+
+function renderCloudImages(items, append = false) {
+    if (!dom.cloudImagesGrid) return;
+    if (!append) dom.cloudImagesGrid.innerHTML = '';
+    (items || []).forEach((it) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'group relative rounded-lg border border-gray-800 bg-gray-900/30 overflow-hidden';
+        wrap.innerHTML = `
+            <img src="${it.fileUri}" class="w-full h-28 object-cover block" loading="lazy" />
+            <div class="absolute inset-x-0 bottom-0 p-1 bg-black/50 text-[10px] text-gray-200 opacity-0 group-hover:opacity-100 transition-opacity truncate">
+                ${(it.name || '').toString()}
+            </div>
+        `;
+        wrap.addEventListener('click', (e) => {
+            e.preventDefault();
+            openLightbox(it.fileUri);
+        });
+        dom.cloudImagesGrid.appendChild(wrap);
+    });
+
+    const total = dom.cloudImagesGrid.children.length;
+    if (dom.cloudImagesEmpty) dom.cloudImagesEmpty.classList.toggle('hidden', total > 0);
+}
+
+async function fetchCloudImagesPage(reset = false) {
+    if (!isAuthed()) {
+        alert('请先登录');
+        return;
+    }
+    if (cloudImagesState.loading) return;
+    cloudImagesState.loading = true;
+    try {
+        const kind = cloudImagesState.tab;
+        const cursor = reset ? null : cloudImagesState.cursor;
+        const qs = new URLSearchParams();
+        qs.set('kind', kind);
+        qs.set('limit', '200');
+        if (cursor) qs.set('cursor', cursor);
+        const res = await apiFetchJson(`/api/images/list?${qs.toString()}`);
+        const items = Array.isArray(res.items) ? res.items : [];
+        cloudImagesState.cursor = res.nextCursor || null;
+        renderCloudImages(items, !reset);
+
+        if (dom.cloudImagesLoadMore) {
+            dom.cloudImagesLoadMore.classList.toggle('hidden', !cloudImagesState.cursor);
+        }
+    } finally {
+        cloudImagesState.loading = false;
+    }
+}
+
+async function refreshCloudImages() {
+    cloudImagesState.cursor = null;
+    if (dom.cloudImagesEmpty) dom.cloudImagesEmpty.classList.add('hidden');
+    if (dom.cloudImagesLoadMore) dom.cloudImagesLoadMore.classList.add('hidden');
+    await fetchCloudImagesPage(true);
+}
+
+async function loadMoreCloudImages() {
+    await fetchCloudImagesPage(false);
 }
 
 async function submitAuth() {
@@ -1159,14 +1310,44 @@ async function trySaveImageToServer(kind, dataUrl) {
     }
 }
 
+async function saveImagesToServerBatch(kind, dataUrls, chunkSize = 5) {
+    if (!isAuthed()) return new Array(dataUrls.length).fill(null);
+    const urls = Array.isArray(dataUrls) ? dataUrls : [];
+    const size = Math.max(1, Math.min(20, Number(chunkSize) || 5));
+    const results = [];
+
+    for (let i = 0; i < urls.length; i += size) {
+        const chunk = urls.slice(i, i + size);
+        try {
+            const res = await apiFetchJson('/api/images/save-batch', {
+                method: 'POST',
+                json: { kind, images: chunk.map(d => ({ dataUrl: d })) }
+            });
+            const items = Array.isArray(res.items) ? res.items : [];
+            results.push(...items);
+        } catch (e) {
+            // Quota exceeded or server error: stop early, keep alignment with nulls
+            console.warn('批量保存图片到服务器失败:', e);
+            if (e?.status === 507) {
+                alert(e.message || '图库容量不足');
+            }
+            results.push(...new Array(chunk.length).fill(null));
+        }
+    }
+    return results;
+}
+
 async function handleFileUpload(files, target, rowIdx = null) {
     const list = Array.from(files || []).filter(f => f && f.type && f.type.startsWith('image/'));
-    for (const file of list) {
-        const dataUrl = await readFileAsDataURL(file);
-        const imgObj = { mime: dataUrl.split(';')[0].split(':')[1], data: dataUrl.split(',')[1], b64: dataUrl };
+    const dataUrls = await mapWithConcurrency(list, 4, async (file) => await readFileAsDataURL(file));
+    const storedItems = await saveImagesToServerBatch('uploads', dataUrls, 5);
 
-        // 按用户落盘：uploads/
-        const stored = await trySaveImageToServer('uploads', dataUrl);
+    for (let i = 0; i < dataUrls.length; i++) {
+        const dataUrl = dataUrls[i];
+        const mime = dataUrl.split(';')[0].split(':')[1];
+        const b64 = dataUrl.split(',')[1];
+        const imgObj = { mime, data: b64, b64: dataUrl };
+        const stored = storedItems[i];
         if (stored?.fileUri) imgObj.file_uri = stored.fileUri;
 
         if (target === 'global') {
@@ -1180,6 +1361,8 @@ async function handleFileUpload(files, target, rowIdx = null) {
             }
         }
     }
+
+    refreshCloudUsage().catch(() => {});
 
     // Reset inputs
     dom.fileInput.value = '';
@@ -1749,7 +1932,11 @@ async function runBatchGeneration() {
             const parts = [];
             if (msg.text) parts.push({ text: msg.text });
             msg.images.forEach(img => {
-                parts.push({ inline_data: { mime_type: img.mime, data: img.data } });
+                if (img.file_uri) {
+                    parts.push({ file_data: { mime_type: img.mime, file_uri: img.file_uri } });
+                } else {
+                    parts.push({ inline_data: { mime_type: img.mime, data: img.data } });
+                }
             });
             return { role: msg.role, parts };
         });
@@ -1761,7 +1948,11 @@ async function runBatchGeneration() {
         const parts = [];
         if (text) parts.push({ text });
         state.images.forEach(img => {
-            parts.push({ inline_data: { mime_type: img.mime, data: img.data } });
+            if (img.file_uri) {
+                parts.push({ file_data: { mime_type: img.mime, file_uri: img.file_uri } });
+            } else {
+                parts.push({ inline_data: { mime_type: img.mime, data: img.data } });
+            }
         });
         contents = [{ role: 'user', parts }];
 
@@ -2192,35 +2383,7 @@ function getSessionPromptSummary(session) {
     return text.slice(0, 200);
 }
 
-async function persistHistorySession(sessionId) {
-    if (!isAuthed()) return;
-    const session = state.sessions[sessionId];
-    if (!session) return;
-
-    const images = [];
-    (session.messages || []).forEach(msg => {
-        if (msg.role !== 'model') return;
-        (msg.parts || []).forEach(part => {
-            const fileData = part.file_data || part.fileData;
-            if (fileData?.file_uri) images.push(fileData.file_uri);
-        });
-    });
-
-    const entry = {
-        id: sessionId,
-        timestamp: session.timestamp || Date.now(),
-        prompt: getSessionPromptSummary(session),
-        images,
-        model: dom.modelId?.value || '',
-        apiFormat: state.apiFormat || 'gemini'
-    };
-
-    try {
-        await apiFetchJson('/api/history/sessions/add', { method: 'POST', json: { entry } });
-    } catch (e) {
-        console.warn('写入历史记录失败（可忽略）:', e);
-    }
-}
+// 已移除“未收藏聊天记录云端同步”功能：不再自动同步 sessions/snapshots。
 
 async function persistGeneratedImagesInSession(sessionId) {
     if (!isAuthed()) return;
@@ -2268,9 +2431,10 @@ async function persistGeneratedImagesInSession(sessionId) {
         }
 
         if (remoteJobs.length) {
-            for (let j = 0; j < remoteJobs.length; j++) {
-                const part = partRefs[inlineJobs.length + j];
-                const url = remoteJobs[j].url;
+            const baseIndex = inlineJobs.length;
+            await mapWithConcurrency(remoteJobs, 3, async (job, j) => {
+                const part = partRefs[baseIndex + j];
+                const url = job.url;
                 try {
                     const stored = await apiFetchJson('/api/images/fetch', { method: 'POST', json: { kind: 'generated', url } });
                     if (stored?.fileUri && part) {
@@ -2280,7 +2444,7 @@ async function persistGeneratedImagesInSession(sessionId) {
                 } catch (e) {
                     console.warn('拉取远程生成图失败（可忽略）:', url, e);
                 }
-            }
+            });
         }
 
         renderCardPreview(sessionId);
@@ -2290,8 +2454,11 @@ async function persistGeneratedImagesInSession(sessionId) {
             if (lastModel) renderChatMessage('model', lastModel.parts);
         }
 
-        await persistHistorySession(sessionId);
+        // 已移除“未收藏聊天记录云端同步”：这里只做生成图落盘，不写入云端历史。
     } catch (e) {
+        if (e?.status === 507) {
+            alert(e.message || '图库容量不足');
+        }
         console.warn('保存模型生成图片失败（可忽略）:', e);
     }
 }
