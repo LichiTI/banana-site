@@ -1,0 +1,14 @@
+{
+  "name": "getbanana",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Banana (banana.html) + zero-dependency Node.js backend (server/)",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
+

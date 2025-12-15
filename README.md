@@ -26,7 +26,6 @@
 1) 启动后端
 
 ```bash
-cd server
 npm start
 ```
 
@@ -97,7 +96,7 @@ sudo chown -R $USER:$USER /opt/banana
 ### 4) 安装依赖并配置环境变量
 
 ```bash
-cd /opt/banana/server
+cd /opt/banana
 npm install --omit=dev
 ```
 
@@ -230,3 +229,42 @@ sudo certbot --nginx -d your-domain.com
 - 默认：第一个注册用户自动成为 Admin
 - 推荐：在服务环境变量中设置 `BANANA_ADMIN_USER` / `BANANA_ADMIN_PASS`
 
+## 宝塔面板（BT）部署教程（Node 项目）
+
+建议将“项目目录”指向仓库根目录（即包含 `package.json` 的目录），这样宝塔可以直接执行：
+
+- 安装命令：`npm install --omit=dev`
+- 启动命令：`npm start`
+
+### 1) 上传/拉取代码
+
+把项目放到例如：`/www/wwwroot/getbanana`
+
+目录里应包含：
+
+- `package.json`
+- `server/index.js`
+- `banana.html`
+- `assets/`
+
+### 2) 创建/配置环境变量
+
+在宝塔 Node 项目里配置环境变量（或在项目目录创建 `server/.env`，注意不要提交到 Git）：
+
+- `PORT=3000`（按你在宝塔里配置的端口/反代端口调整）
+- `NODE_ENV=production`（HTTPS 下推荐）
+- `BANANA_ADMIN_USER=admin`、`BANANA_ADMIN_PASS=强密码`（推荐）
+
+### 3) 宝塔 Node 项目设置建议
+
+- 项目目录：`/www/wwwroot/getbanana`
+- 启动文件/启动命令：优先用 `npm start`（等价于 `node server/index.js`）
+- 端口：使用环境变量 `PORT` 控制
+
+### 4) 反向代理（推荐域名访问）
+
+在宝塔里给域名配置反向代理到：
+
+- `http://127.0.0.1:3000`（示例）
+
+并把上传大小限制调大（因为会上传/保存图片），例如 50MB。
