@@ -5,6 +5,8 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { URL } = require('node:url');
+const { Transform } = require('node:stream');
+const { pipeline } = require('node:stream/promises');
 
 const ROOT = path.resolve(__dirname, '..');
 const DATA_ROOT = path.join(ROOT, 'data');
@@ -412,6 +414,52 @@ async function removeDirContentsRecursive(dirPath) {
   }
 }
 
+function getContentLength(req) {
+  const h = req.headers['content-length'];
+  if (!h) return null;
+  const n = parseInt(String(h), 10);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
+}
+
+async function getGalleryBytesLeft(username) {
+  const quotaBytes = await getQuotaBytes(username);
+  if (quotaBytes == null) return { quotaBytes: null, usedBytes: 0, leftBytes: null };
+  let usage = await readUsage(username);
+  let usedBytes = usage.uploadsBytes + usage.generatedBytes;
+  if (usedBytes > quotaBytes) {
+    usage = await recomputeUsage(username);
+    usedBytes = usage.uploadsBytes + usage.generatedBytes;
+  }
+  const leftBytes = Math.max(0, quotaBytes - usedBytes);
+  return { quotaBytes, usedBytes, leftBytes };
+}
+
+async function writeRequestStreamToFile(req, absPath, byteLimit) {
+  let bytes = 0;
+  const limiter = new Transform({
+    transform(chunk, _enc, cb) {
+      bytes += chunk.length;
+      if (byteLimit != null && bytes > byteLimit) {
+        const err = new Error('图库容量不足');
+        err.statusCode = 507;
+        cb(err);
+        return;
+      }
+      cb(null, chunk);
+    },
+  });
+
+  const ws = fs.createWriteStream(absPath, { flags: 'wx' });
+  try {
+    await pipeline(req, limiter, ws);
+    return bytes;
+  } catch (e) {
+    await safeUnlink(absPath);
+    throw e;
+  }
+}
+
 async function saveUserMeta(username, meta) {
   const metaPath = path.join(USERS_ROOT, username, 'meta.json');
   await writeJsonAtomic(metaPath, meta);
@@ -749,6 +797,99 @@ async function main() {
       if (pathname === '/api/auth/logout' && req.method === 'POST') {
         clearAuthCookie(res);
         return sendJson(res, 200, { ok: true });
+      }
+
+      if (pathname === '/api/images/upload' && req.method === 'POST') {
+        const auth = requireAuth(secret, req);
+        if (!auth) return sendJson(res, 401, { error: 'Unauthorized' });
+
+        const kind = String(url.searchParams.get('kind') || '').toLowerCase();
+        if (!['uploads', 'generated'].includes(kind)) return sendJson(res, 400, { error: 'Invalid kind' });
+
+        const mime = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+        if (!mime.startsWith('image/')) return sendJson(res, 400, { error: 'Invalid content-type' });
+
+        const name = String(url.searchParams.get('name') || '').trim();
+        let ext = mimeToExt(mime);
+        if (ext === 'bin' && name) {
+          const fromName = path.extname(name).replace('.', '').toLowerCase();
+          if (fromName) ext = fromName;
+        }
+        if (!ext || ext === 'bin') return sendJson(res, 400, { error: 'Unsupported image type' });
+
+        const incoming = getContentLength(req);
+        let byteLimit = null;
+        if (incoming != null) {
+          await assertGalleryHasSpace(auth.u, kind, incoming);
+        } else {
+          const left = await getGalleryBytesLeft(auth.u);
+          if (left.leftBytes != null) {
+            if (left.leftBytes <= 0) {
+              const err = new Error('图库容量不足');
+              err.statusCode = 507;
+              throw err;
+            }
+            byteLimit = left.leftBytes;
+          }
+        }
+
+        const fileName = `${Date.now()}_${crypto.randomBytes(6).toString('hex')}.${ext}`;
+        const absPath = path.join(USERS_ROOT, auth.u, kind, fileName);
+        await ensureDir(path.dirname(absPath));
+        const bytes = await writeRequestStreamToFile(req, absPath, byteLimit);
+        await addUsage(auth.u, kind, bytes);
+        const fileUri = `/files/${encodeURIComponent(auth.u)}/${kind}/${encodeURIComponent(fileName)}`;
+        return sendJson(res, 200, { fileUri, mime });
+      }
+
+      if (pathname === '/api/images/thumb-upload' && req.method === 'POST') {
+        const auth = requireAuth(secret, req);
+        if (!auth) return sendJson(res, 401, { error: 'Unauthorized' });
+
+        const kind = String(url.searchParams.get('kind') || '').toLowerCase();
+        if (!['uploads', 'generated'].includes(kind)) return sendJson(res, 400, { error: 'Invalid kind' });
+
+        const originalFileUri = String(url.searchParams.get('originalFileUri') || '');
+        if (!originalFileUri.startsWith(`/files/${auth.u}/${kind}/`)) {
+          return sendJson(res, 400, { error: 'Invalid originalFileUri' });
+        }
+
+        const mime = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+        if (mime !== 'image/webp') return sendJson(res, 400, { error: 'Invalid content-type' });
+
+        const incoming = getContentLength(req);
+        let byteLimit = null;
+        if (incoming != null) {
+          await assertGalleryHasSpace(auth.u, kind, incoming);
+        } else {
+          const left = await getGalleryBytesLeft(auth.u);
+          if (left.leftBytes != null) {
+            if (left.leftBytes <= 0) {
+              const err = new Error('图库容量不足');
+              err.statusCode = 507;
+              throw err;
+            }
+            byteLimit = left.leftBytes;
+          }
+        }
+
+        const rel = decodeURIComponent(originalFileUri.replace(`/files/${auth.u}/`, ''));
+        const abs = path.join(USERS_ROOT, auth.u, rel);
+        if (!abs.startsWith(path.join(USERS_ROOT, auth.u))) return sendJson(res, 400, { error: 'Bad path' });
+        try {
+          const st = await fsp.stat(abs);
+          if (!st.isFile()) return sendJson(res, 404, { error: 'Not found' });
+        } catch (e) {
+          if (e.code === 'ENOENT') return sendJson(res, 404, { error: 'Not found' });
+          throw e;
+        }
+
+        const thumbPath = getThumbPathForImagePath(abs);
+        await ensureDir(path.dirname(thumbPath));
+        const bytes = await writeRequestStreamToFile(req, thumbPath, byteLimit);
+        await addUsage(auth.u, kind, bytes);
+        const thumbUri = `/files/${encodeURIComponent(auth.u)}/${kind}/thumbs/${encodeURIComponent(path.basename(thumbPath))}`;
+        return sendJson(res, 200, { ok: true, thumbUri });
       }
 
       if (pathname === '/api/images/save' && req.method === 'POST') {

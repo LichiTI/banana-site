@@ -120,6 +120,121 @@ async function imageDataUrlToWebpThumb(dataUrl, maxSize = 256, quality = 0.7) {
     });
 }
 
+function dataUrlToBlob(dataUrl) {
+    const str = String(dataUrl || '');
+    const m = str.match(/^data:([^;]+);base64,(.+)$/);
+    if (!m) return null;
+    const mime = m[1];
+    const b64 = m[2];
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], { type: mime });
+}
+
+async function imageSrcToWebpThumbBlob(src, maxSize = 256, quality = 0.7) {
+    const url = String(src || '');
+    if (!url) return null;
+    return await new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            try {
+                const w = img.naturalWidth || img.width || 1;
+                const h = img.naturalHeight || img.height || 1;
+                const scale = Math.min(1, maxSize / Math.max(w, h));
+                const tw = Math.max(1, Math.round(w * scale));
+                const th = Math.max(1, Math.round(h * scale));
+                const canvas = document.createElement('canvas');
+                canvas.width = tw;
+                canvas.height = th;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, tw, th);
+                canvas.toBlob((blob) => resolve(blob || null), 'image/webp', quality);
+            } catch {
+                resolve(null);
+            }
+        };
+        img.onerror = () => resolve(null);
+        img.src = url;
+    });
+}
+
+async function fileToWebpThumbBlob(file, maxSize = 256, quality = 0.7) {
+    if (!file) return null;
+    const objectUrl = URL.createObjectURL(file);
+    try {
+        return await imageSrcToWebpThumbBlob(objectUrl, maxSize, quality);
+    } finally {
+        URL.revokeObjectURL(objectUrl);
+    }
+}
+
+async function blobToWebpThumbBlob(blob, maxSize = 256, quality = 0.7) {
+    if (!blob) return null;
+    const objectUrl = URL.createObjectURL(blob);
+    try {
+        return await imageSrcToWebpThumbBlob(objectUrl, maxSize, quality);
+    } finally {
+        URL.revokeObjectURL(objectUrl);
+    }
+}
+
+async function apiUploadImageBinary(kind, blob, name = '') {
+    const qs = new URLSearchParams();
+    qs.set('kind', kind);
+    if (name) qs.set('name', name);
+    const res = await fetch(`/api/images/upload?${qs.toString()}`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': blob?.type || 'application/octet-stream' },
+        body: blob
+    });
+    if (res.status === 404) {
+        const err = new Error('Binary upload not supported');
+        err.status = 404;
+        throw err;
+    }
+    const text = await res.text();
+    if (!res.ok) {
+        const err = new Error(text || `HTTP ${res.status}`);
+        err.status = res.status;
+        throw err;
+    }
+    try {
+        return JSON.parse(text);
+    } catch {
+        return {};
+    }
+}
+
+async function apiUploadThumbBinary(kind, originalFileUri, thumbBlob) {
+    const qs = new URLSearchParams();
+    qs.set('kind', kind);
+    qs.set('originalFileUri', originalFileUri);
+    const res = await fetch(`/api/images/thumb-upload?${qs.toString()}`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': thumbBlob?.type || 'image/webp' },
+        body: thumbBlob
+    });
+    if (res.status === 404) {
+        const err = new Error('Binary thumb upload not supported');
+        err.status = 404;
+        throw err;
+    }
+    const text = await res.text();
+    if (!res.ok) {
+        const err = new Error(text || `HTTP ${res.status}`);
+        err.status = res.status;
+        throw err;
+    }
+    try {
+        return JSON.parse(text);
+    } catch {
+        return {};
+    }
+}
+
 async function fileUriToDataUrl(fileUri) {
     const res = await fetch(fileUri, { credentials: 'same-origin' });
     if (!res.ok) throw new Error(`读取失败: HTTP ${res.status}`);
@@ -1547,15 +1662,112 @@ async function saveImagesToServerBatchWithThumbs(kind, items, chunkSize = 5) {
     return results;
 }
 
+async function saveFilesToServerFastWithThumbs(kind, files, { thumbMaxSize = 256, thumbQuality = 0.7, concurrency = 3 } = {}) {
+    if (!isAuthed()) return new Array((files || []).length).fill(null);
+    const list = Array.from(files || []);
+    const cap = Math.max(1, Math.min(6, Number(concurrency) || 3));
+
+    let stop = false;
+    let quotaAlerted = false;
+
+    return await mapWithConcurrency(list, cap, async (file) => {
+        if (stop) return null;
+        try {
+            const stored = await apiUploadImageBinary(kind, file, file?.name || '');
+            let thumbUri = null;
+            try {
+                const thumbBlob = await fileToWebpThumbBlob(file, thumbMaxSize, thumbQuality);
+                if (thumbBlob && stored?.fileUri) {
+                    try {
+                        const t = await apiUploadThumbBinary(kind, stored.fileUri, thumbBlob);
+                        thumbUri = t?.thumbUri || null;
+                    } catch (e2) {
+                        if (e2?.status !== 404) console.warn('thumb-upload failed:', e2);
+                    }
+                }
+            } catch (e3) {
+                console.warn('thumb gen failed:', e3);
+            }
+            return { ...stored, thumbUri };
+        } catch (e) {
+            if (e?.status === 404) throw e; // fallback to legacy base64 endpoints
+            if (e?.status === 507) {
+                if (!quotaAlerted) {
+                    quotaAlerted = true;
+                    alert(e.message || '图库容量不足');
+                }
+                stop = true;
+                return null;
+            }
+            console.warn('binary upload failed:', e);
+            return null;
+        }
+    });
+}
+
+async function saveDataUrlsToServerFastWithThumbs(kind, dataUrls, { thumbMaxSize = 256, thumbQuality = 0.7, concurrency = 3 } = {}) {
+    if (!isAuthed()) return new Array((dataUrls || []).length).fill(null);
+    const list = Array.isArray(dataUrls) ? dataUrls : [];
+    const cap = Math.max(1, Math.min(6, Number(concurrency) || 3));
+
+    let stop = false;
+    let quotaAlerted = false;
+
+    return await mapWithConcurrency(list, cap, async (dataUrl, idx) => {
+        if (stop) return null;
+        const blob = dataUrlToBlob(dataUrl);
+        if (!blob) return null;
+        try {
+            const stored = await apiUploadImageBinary(kind, blob, `inline_${Date.now()}_${idx}.png`);
+            let thumbUri = null;
+            try {
+                const thumbBlob = await blobToWebpThumbBlob(blob, thumbMaxSize, thumbQuality);
+                if (thumbBlob && stored?.fileUri) {
+                    try {
+                        const t = await apiUploadThumbBinary(kind, stored.fileUri, thumbBlob);
+                        thumbUri = t?.thumbUri || null;
+                    } catch (e2) {
+                        if (e2?.status !== 404) console.warn('thumb-upload failed:', e2);
+                    }
+                }
+            } catch (e3) {
+                console.warn('thumb gen failed:', e3);
+            }
+            return { ...stored, thumbUri };
+        } catch (e) {
+            if (e?.status === 404) throw e;
+            if (e?.status === 507) {
+                if (!quotaAlerted) {
+                    quotaAlerted = true;
+                    alert(e.message || '图库容量不足');
+                }
+                stop = true;
+                return null;
+            }
+            console.warn('binary upload failed:', e);
+            return null;
+        }
+    });
+}
+
 async function handleFileUpload(files, target, rowIdx = null) {
     const list = Array.from(files || []).filter(f => f && f.type && f.type.startsWith('image/'));
     const dataUrls = await mapWithConcurrency(list, 4, async (file) => await readFileAsDataURL(file));
-    const thumbUrls = await mapWithConcurrency(dataUrls, 4, async (d) => await imageDataUrlToWebpThumb(d, 256, 0.7));
-    const storedItems = await saveImagesToServerBatchWithThumbs(
-        'uploads',
-        dataUrls.map((d, i) => ({ dataUrl: d, thumbDataUrl: thumbUrls[i] })),
-        5
-    );
+
+    let storedItems = new Array(dataUrls.length).fill(null);
+    if (isAuthed() && list.length) {
+        try {
+            storedItems = await saveFilesToServerFastWithThumbs('uploads', list, { thumbMaxSize: 256, thumbQuality: 0.7, concurrency: 3 });
+        } catch (e) {
+            console.warn('fast binary upload not available, fallback to base64:', e);
+            const thumbUrls = await mapWithConcurrency(dataUrls, 4, async (d) => await imageDataUrlToWebpThumb(d, 256, 0.7));
+            storedItems = await saveImagesToServerBatchWithThumbs(
+                'uploads',
+                dataUrls.map((d, i) => ({ dataUrl: d, thumbDataUrl: thumbUrls[i] })),
+                5
+            );
+        }
+    }
 
     for (let i = 0; i < dataUrls.length; i++) {
         const dataUrl = dataUrls[i];
@@ -2349,7 +2561,7 @@ async function executeSessionTurn(sessionId, configOverride = null, isRetry = fa
                 if (!creds) {
                     throw new Error('Vertex: 未配置 Keys（格式：API_KEY|PROJECT_ID）');
                 }
-                const location = 'us-central1';
+                const location = 'global';
                 const publisher = 'google';
 
                 url = `${base}/${ver}/projects/${creds.projectId}/locations/${location}/publishers/${publisher}/models/${model}:streamGenerateContent?key=${creds.key}`;
@@ -2632,12 +2844,22 @@ async function persistGeneratedImagesInSession(sessionId) {
 
     try {
         if (inlineJobs.length) {
-            const thumbUrls = await mapWithConcurrency(inlineJobs, 4, async (job) => await imageDataUrlToWebpThumb(job.dataUrl, 256, 0.7));
-            const items = await saveImagesToServerBatchWithThumbs(
-                'generated',
-                inlineJobs.map((job, i) => ({ dataUrl: job.dataUrl, thumbDataUrl: thumbUrls[i] })),
-                5
-            );
+            let items = null;
+            try {
+                items = await saveDataUrlsToServerFastWithThumbs(
+                    'generated',
+                    inlineJobs.map((job) => job.dataUrl),
+                    { thumbMaxSize: 256, thumbQuality: 0.7, concurrency: 3 }
+                );
+            } catch (e) {
+                console.warn('fast binary upload not available, fallback to base64:', e);
+                const thumbUrls = await mapWithConcurrency(inlineJobs, 4, async (job) => await imageDataUrlToWebpThumb(job.dataUrl, 256, 0.7));
+                items = await saveImagesToServerBatchWithThumbs(
+                    'generated',
+                    inlineJobs.map((job, i) => ({ dataUrl: job.dataUrl, thumbDataUrl: thumbUrls[i] })),
+                    5
+                );
+            }
             for (let i = 0; i < items.length; i++) {
                 const stored = items[i];
                 const part = partRefs[i];
@@ -2662,13 +2884,28 @@ async function persistGeneratedImagesInSession(sessionId) {
                         delete part.fileData;
                         // Backfill thumbnail for this remote-saved image
                         try {
-                            const dataUrl = await fileUriToDataUrl(stored.fileUri);
-                            const thumb = await imageDataUrlToWebpThumb(dataUrl, 256, 0.7);
-                            if (thumb) {
-                                await apiFetchJson('/api/images/thumb', {
-                                    method: 'POST',
-                                    json: { kind: 'generated', originalFileUri: stored.fileUri, thumbDataUrl: thumb }
-                                });
+                            const fileRes = await fetch(stored.fileUri, { credentials: 'same-origin' });
+                            if (fileRes.ok) {
+                                const blob = await fileRes.blob();
+                                const thumbBlob = await blobToWebpThumbBlob(blob, 256, 0.7);
+                                if (thumbBlob) {
+                                    try {
+                                        await apiUploadThumbBinary('generated', stored.fileUri, thumbBlob);
+                                    } catch (e3) {
+                                        if (e3?.status === 404) {
+                                            const dataUrl = await fileUriToDataUrl(stored.fileUri);
+                                            const thumb = await imageDataUrlToWebpThumb(dataUrl, 256, 0.7);
+                                            if (thumb) {
+                                                await apiFetchJson('/api/images/thumb', {
+                                                    method: 'POST',
+                                                    json: { kind: 'generated', originalFileUri: stored.fileUri, thumbDataUrl: thumb }
+                                                });
+                                            }
+                                        } else {
+                                            throw e3;
+                                        }
+                                    }
+                                }
                             }
                         } catch (e2) {
                             console.warn('生成图缩略图补传失败（可忽略）:', e2);
